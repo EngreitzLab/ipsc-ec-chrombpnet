@@ -1,0 +1,32 @@
+# results: all model outputs, contribution scores, hit calls
+results/
+
+# analysis: excluded per project scope
+analysis/
+
+# large input data
+data/bams/
+data/gex/
+data/scE2G_links/
+data/*.bed
+
+# pipeline runtime files
+pipeline/logs/
+pipeline/*.log
+*.log
+*.out
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+.virtual_documents/
+
+# Claude Code internal
+.claude/
+
+# editor
+.vscode/
+.idea/
+*.swp
