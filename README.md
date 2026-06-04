@@ -105,6 +105,7 @@ Conda environments used:
 
 ---
 
-## Reference
+## References
 
-Genome: hg38. JASPAR 2022 CORE vertebrates (non-redundant) for motif annotation.
+Genome: hg38
+Motif annotation: MotifCompendium-Database-Human (download from https://github.com/kundajelab/MotifCompendium)
