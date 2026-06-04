@@ -68,6 +68,6 @@ modisco report \
     -i "${averaged_dir}/${day}/modisco/modisco_counts_results.h5" \
     -o "${averaged_dir}/${day}/modisco/counts_report" \
     -s "${averaged_dir}/${day}/modisco/counts_report" \
-    -m "${jaspar_meme}"
+    -m "${ref_db_meme}"
 
 echo "${day} MoDISco complete"

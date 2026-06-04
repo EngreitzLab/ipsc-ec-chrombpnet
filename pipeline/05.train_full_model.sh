@@ -10,7 +10,7 @@
 # 05.train_full_model.sh
 # Purpose: Train the bias-factorised ChromBPNet full model for all days and
 #          folds, using the per-fold optimal bias model selected in step 04
-#          (04.select_bias_model.py). Each fold uses the bias suffix recorded
+#          (04.0.select_bias_model.py). Each fold uses the bias suffix recorded
 #          in fold_bias_suffix in config.sh.
 #
 # Output directory: ${full_model_dir} (set in config.sh)
@@ -38,7 +38,7 @@ bias_model="${results_path}/bias_models/bias_model${suffix}/${bias_day}_${peak_t
 if [[ ! -f "${bias_model}" ]]; then
     echo "ERROR: Bias model not found for fold ${fold} (suffix ${suffix}):" >&2
     echo "  ${bias_model}" >&2
-    echo "  Run 2.0-train_bias_model.sh first." >&2
+    echo "  Run 03.train_bias_model.sh first." >&2
     exit 1
 fi
 

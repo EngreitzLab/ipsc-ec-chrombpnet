@@ -1,37 +1,39 @@
 """
-5.0-model_qc.py
-===============
+05.qc_full_model.py
 Visualize ChromBPNet full-model performance metrics across all days and folds.
 
 Reads from <full_model_dir>/<day>_<peak_type>_fold_<fold>/:
   - evaluation/chrombpnet_metrics.json            (Pearson R, Spearman R, median JSD)
   - evaluation/chrombpnet_nobias_max_bias_response.txt (Tn5 motif response in final model)
   - evaluation/chrombpnet_predictions.h5          (predicted log-counts)
-  - auxiliary/data_unstranded.bw                  (observed ATAC-seq signal; written by ChromBPNet during training)
+  - auxiliary/data_unstranded.bw                  (observed ATAC-seq signal)
 
 Produces:
-  qc/model_metrics.tsv                 – table of all metrics
-  qc/performance_boxplot.pdf           – counts Pearson R, Spearman R, JSD
-  qc/tn5_response.pdf                  – Tn5 motif response per day × fold
-  qc/<day>_fold<fold>_scatter.pdf      – predicted vs observed log-count scatter
+  <out-dir>/model_metrics.tsv                      table of all metrics
+  <out-dir>/performance_boxplot.pdf/png            counts Pearson R, JSD
+  <out-dir>/tn5_response.pdf/png                   Tn5 motif response per day x fold
+  <out-dir>/<day>_fold<fold>_scatter.pdf/png       predicted vs observed log-count scatter
+  <out-dir>/<day>_fold<fold>_scatter_data.tsv      scatter plot data
 
-Usage (from pipeline/):
-  python 5.0.model_qc.py \
-      --full-model-dir ../chrombpnet_full_model_selected \
-      --data-path     ../chrombpnet_data \
-      --days d0 d1 d2 d3 d4 \
-      --folds 0 1 2 3 4 \
-      --peak-type all \
-      --out-dir qc
+Run after step 05 (train_full_model.sh) via 05.qc_run_full_model.sh.
+
+Usage:
+  python 05.qc_full_model.py \\
+      --full-model-dir ../results/full_models \\
+      --data-path      ../results/preprocessing \\
+      --days d0 d1 d2 d3 d4 \\
+      --folds 0 1 2 3 4 \\
+      --peak-type all \\
+      --out-dir ../results/plots/full_model_qc
 """
 
+# %%
 import argparse
 import json
 import re
 import sys
 from pathlib import Path
 
-import h5py
 import matplotlib
 
 matplotlib.use("Agg")
@@ -39,11 +41,22 @@ import matplotlib.pyplot as plt
 
 matplotlib.rcParams["axes.spines.top"] = False
 matplotlib.rcParams["axes.spines.right"] = False
+matplotlib.rcParams["font.size"] = 10
+matplotlib.rcParams["axes.labelsize"] = 10
+matplotlib.rcParams["axes.titlesize"] = 10
+matplotlib.rcParams["xtick.labelsize"] = 10
+matplotlib.rcParams["ytick.labelsize"] = 10
+matplotlib.rcParams["legend.fontsize"] = 10
+matplotlib.rcParams["figure.dpi"] = 100
+matplotlib.rcParams["savefig.dpi"] = 300
+matplotlib.rcParams["savefig.bbox"] = "tight"
+matplotlib.rcParams["savefig.transparent"] = True
+
 import numpy as np
 import pandas as pd
 from scipy.stats import pearsonr, spearmanr
 
-# Test chromosomes per fold (standard chrombpnet splits)
+# Test chromosomes per fold (standard ChromBPNet splits)
 TEST_CHROMS = {
     "0": ["chr1", "chr3", "chr6"],
     "1": ["chr2", "chr8", "chr9", "chr16"],
@@ -64,25 +77,28 @@ NARROWPEAK_SCHEMA = [
     "summit",
 ]
 
+DAY_COLORS = {
+    "d0": "#A6A6A6",
+    "d1": "#D3C72F",
+    "d2": "#D37739",
+    "d3": "#9B3A48",
+    "d4": "#CD7986",
+}
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
-
-def load_metrics_json(path: Path) -> dict:
+# %%
+def load_metrics_json(path):
     with open(path) as f:
         return json.load(f)
 
 
-def parse_bias_response(path: Path) -> dict:
+def parse_bias_response(path):
     """Parse chrombpnet_nobias_max_bias_response.txt.
 
     Example content:  corrected_0.001_0.001/0.001/0.001/0.001/0.001
-    Returns dict with keys tn5_1 … tn5_5 (floats).
+    Returns dict with keys tn5_1 ... tn5_5 (floats).
     """
     text = path.read_text().strip()
-    # strip "corrected_" prefix, then split on _ and /
     text = re.sub(r"^corrected_", "", text)
     parts = re.split(r"[_/]", text)
     responses = {}
@@ -95,25 +111,23 @@ def parse_bias_response(path: Path) -> dict:
 
 
 def load_pred_obs_counts(
-    pred_h5_path: Path,
-    filtered_peaks_bed: Path,
-    full_model_dir: str,
-    day: str,
-    fold: str,
-    peak_type: str,
-    outputlen: int = 1000,
-) -> tuple[np.ndarray, np.ndarray]:
+    pred_h5_path,
+    filtered_peaks_bed,
+    full_model_dir,
+    day,
+    fold,
+    peak_type,
+    outputlen=1000,
+):
     """Load predicted log-counts and observed log-counts.
 
-    Observed counts come from auxiliary/data_unstranded.bw, which ChromBPNet
-    writes during training (the exact signal the model was trained on).
-
-    Returns (obs_log_counts, pred_log_counts) arrays filtered to test chroms.
+    Observed counts come from auxiliary/data_unstranded.bw, written by ChromBPNet
+    during training. Returns (obs_log_counts, pred_log_counts) for test chromosomes.
     """
     import chrombpnet.training.utils.data_utils as data_utils
+    import h5py
     import pyBigWig
 
-    # Load predictions and coordinates
     with h5py.File(pred_h5_path, "r") as h5:
         pred_logcts = h5["predictions"]["logcounts"][:]
         chroms = np.array(
@@ -127,7 +141,6 @@ def load_pred_obs_counts(
     mask = np.isin(chroms, test_chroms)
     pred_logcts = pred_logcts[mask]
 
-    # Load peaks for test-chrom regions
     peaks_df = pd.read_csv(
         filtered_peaks_bed, sep="\t", names=NARROWPEAK_SCHEMA
     )
@@ -135,7 +148,6 @@ def load_pred_obs_counts(
         drop=True
     )
 
-    # Observed signal: BigWig written by ChromBPNet during training
     bw_file = (
         Path(full_model_dir)
         / f"{day}_{peak_type}_fold_{fold}"
@@ -161,25 +173,11 @@ def load_pred_obs_counts(
         return None, pred_logcts.flatten()
 
 
-# ---------------------------------------------------------------------------
-# Plotting helpers
-# ---------------------------------------------------------------------------
-
-DAY_COLORS = {
-    "d0": "#A6A6A6",
-    "d1": "#D3C72F",
-    "d2": "#D37739",
-    "d3": "#9B3A48",
-    "d4": "#CD7986",
-}
-
-
+# %%
 def box_with_points(ax, labels, group_values, ylabel, title, ylim=None):
-    """Boxplot with individual per-fold points overlaid."""
+    """Boxplot with jittered per-fold points overlaid."""
     colors = [DAY_COLORS.get(lbl, "#888888") for lbl in labels]
-    x = np.arange(
-        1, len(labels) + 1
-    )  # boxplot uses 1-based positions by default
+    x = np.arange(1, len(labels) + 1)
 
     bp = ax.boxplot(
         group_values,
@@ -189,9 +187,7 @@ def box_with_points(ax, labels, group_values, ylabel, title, ylim=None):
         medianprops=dict(color="black", linewidth=1.5),
         whiskerprops=dict(linewidth=1.0),
         capprops=dict(linewidth=1.0),
-        flierprops=dict(
-            marker=""
-        ),  # hide default outlier markers; we draw points instead
+        flierprops=dict(marker=""),
     )
     for patch, color in zip(bp["boxes"], colors):
         patch.set_facecolor(color)
@@ -208,6 +204,15 @@ def box_with_points(ax, labels, group_values, ylabel, title, ylim=None):
             alpha=1,
             linewidths=0,
             rasterized=True,
+        )
+        median_val = np.median(vals)
+        ax.text(
+            xi,
+            max(vals) + 0.01,
+            f"median={median_val:.2f}\nn={len(vals)}",
+            ha="center",
+            va="bottom",
+            fontsize=7,
         )
 
     ax.set_xticks(x)
@@ -244,23 +249,24 @@ def density_scatter(ax, x, y, bins=30):
     )
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
-
+# %%
 def parse_args():
-    p = argparse.ArgumentParser(description="ChromBPNet model QC plots")
-    p.add_argument("--full-model-dir", required=True)
+    p = argparse.ArgumentParser(description="ChromBPNet full model QC plots")
+    p.add_argument(
+        "--full-model-dir",
+        required=True,
+        help="Directory containing per-day/fold model subdirectories (full_model_dir in config.sh)",
+    )
     p.add_argument(
         "--data-path",
         required=True,
-        help="Directory containing hg38 data and per-day peaks",
+        help="Preprocessing directory with per-day peaks (data_path in config.sh)",
     )
     p.add_argument("--days", nargs="+", default=["d0", "d1", "d2", "d3", "d4"])
     p.add_argument("--folds", nargs="+", default=["0"])
     p.add_argument("--peak-type", default="all")
     p.add_argument("--out-dir", default="qc")
+    p.add_argument("--save-plots", action="store_true", default=True)
     return p.parse_args()
 
 
@@ -270,7 +276,6 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     rows = []
-    # Nested dicts: metric -> day -> [values per fold]
     pearsonr_vals = {d: [] for d in args.days}
     spearmanr_vals = {d: [] for d in args.days}
     jsd_vals = {d: [] for d in args.days}
@@ -299,7 +304,6 @@ def main():
                 )
                 continue
 
-            # Load performance metrics
             m = load_metrics_json(metrics_path)
             pr = m["counts_metrics"]["peaks"]["pearsonr"]
             sr = m["counts_metrics"]["peaks"]["spearmanr"]
@@ -309,7 +313,6 @@ def main():
             spearmanr_vals[day].append(sr)
             jsd_vals[day].append(jsd)
 
-            # Load Tn5 bias response
             tn5 = {}
             if bias_resp_path.exists():
                 tn5 = parse_bias_response(bias_resp_path)
@@ -327,9 +330,7 @@ def main():
                 }
             )
 
-            # ----------------------------------------------------------
-            # Scatter plot: predicted vs observed log-counts
-            # ----------------------------------------------------------
+            # Predicted vs observed scatter
             if pred_h5_path.exists() and peaks_bed.exists():
                 try:
                     obs, pred = load_pred_obs_counts(
@@ -341,43 +342,48 @@ def main():
                         args.peak_type,
                     )
                     if obs is not None:
-                        # filter nans
                         ok = ~(np.isnan(obs) | np.isnan(pred))
                         obs_ok, pred_ok = obs[ok], pred[ok]
                         rp = pearsonr(obs_ok, pred_ok)[0]
                         rs = spearmanr(obs_ok, pred_ok)[0]
 
-                        fig, ax = plt.subplots(figsize=(5, 5))
-                        density_scatter(ax, obs_ok, pred_ok)
-                        ax.set_xlabel("Observed log(counts + 1)", fontsize=12)
-                        ax.set_ylabel("Predicted log-counts", fontsize=12)
-                        ax.set_title(
-                            f"{day} fold {fold}",
-                            fontsize=12,
+                        pd.DataFrame(
+                            {
+                                "obs_log_counts": obs_ok,
+                                "pred_log_counts": pred_ok,
+                            }
+                        ).to_csv(
+                            out_dir / f"{day}_fold{fold}_scatter_data.tsv",
+                            sep="\t",
+                            index=False,
                         )
-                        ax.text(
-                            0.05,
-                            0.95,
-                            f"Pearson={rp:.3f}\nSpearman={rs:.3f}",
-                            transform=ax.transAxes,
-                            fontsize=10,
-                            va="top",
-                        )
-                        fig.tight_layout()
-                        for ext in ("pdf", "png"):
-                            fig.savefig(
-                                out_dir / f"{day}_fold{fold}_scatter.{ext}",
-                                dpi=300,
-                                bbox_inches="tight",
-                                transparent=True,
+
+                        if args.save_plots:
+                            fig, ax = plt.subplots(figsize=(5, 5))
+                            density_scatter(ax, obs_ok, pred_ok)
+                            ax.set_xlabel(
+                                "Observed log(counts + 1)", fontsize=12
                             )
-                        plt.close(fig)
+                            ax.set_ylabel("Predicted log-counts", fontsize=12)
+                            ax.set_title(f"{day} fold {fold}", fontsize=12)
+                            ax.text(
+                                0.05,
+                                0.95,
+                                f"Pearson={rp:.3f}\nSpearman={rs:.3f}",
+                                transform=ax.transAxes,
+                                fontsize=10,
+                                va="top",
+                            )
+                            fig.tight_layout()
+                            for ext in ("pdf", "png"):
+                                fig.savefig(
+                                    out_dir / f"{day}_fold{fold}_scatter.{ext}"
+                                )
+                            plt.close(fig)
                 except Exception as e:
                     print(f"[{tag}] Scatter plot failed: {e}", file=sys.stderr)
 
-    # ------------------------------------------------------------------
     # Save metrics table
-    # ------------------------------------------------------------------
     metrics_df = pd.DataFrame(rows)
     metrics_df.to_csv(out_dir / "model_metrics.tsv", sep="\t", index=False)
     print(metrics_df.to_string())
@@ -387,54 +393,36 @@ def main():
         print("No metrics found. Exiting.")
         return
 
-    # ------------------------------------------------------------------
-    # Bar plots: performance metrics
-    # ------------------------------------------------------------------
-    fig, axes = plt.subplots(1, 2, figsize=(6, 5))
-
-    box_with_points(
-        axes[0],
-        days_present,
-        [pearsonr_vals[d] for d in days_present],
-        "Pearson's r",
-        "Counts",
-        ylim=(0.6, 1),
-    )
-    # box_with_points(
-    #     axes[1],
-    #     days_present,
-    #     [spearmanr_vals[d] for d in days_present],
-    #     "Spearman R",
-    #     "Counts Spearman R",
-    #     ylim=(0, 1),
-    # )
-    box_with_points(
-        axes[1],
-        days_present,
-        [jsd_vals[d] for d in days_present],
-        "Median JSD",
-        "Profile ",
-        ylim=(0.6, 1),
-    )
-
-    fig.suptitle(
-        "ChromBPNet model performance (peaks, test chromosomes)",
-        fontsize=11,
-        y=1.02,
-    )
-    fig.tight_layout()
-    for ext in ("pdf", "png"):
-        fig.savefig(
-            out_dir / f"performance_boxplot.{ext}",
-            dpi=300,
-            bbox_inches="tight",
-            transparent=True,
+    # Performance boxplots
+    if args.save_plots:
+        fig, axes = plt.subplots(1, 2, figsize=(6, 5))
+        box_with_points(
+            axes[0],
+            days_present,
+            [pearsonr_vals[d] for d in days_present],
+            "Pearson's r",
+            "Counts",
+            ylim=(0.6, 1),
         )
-    plt.close(fig)
+        box_with_points(
+            axes[1],
+            days_present,
+            [jsd_vals[d] for d in days_present],
+            "Median JSD",
+            "Profile",
+            ylim=(0.6, 1),
+        )
+        fig.suptitle(
+            "ChromBPNet model performance (peaks, test chromosomes)",
+            fontsize=11,
+            y=1.02,
+        )
+        fig.tight_layout()
+        for ext in ("pdf", "png"):
+            fig.savefig(out_dir / f"performance_boxplot.{ext}")
+        plt.close(fig)
 
-    # ------------------------------------------------------------------
-    # Tn5 motif response heatmap / dot plot
-    # ------------------------------------------------------------------
+    # Tn5 motif response plots
     n_motifs = 5
     tn5_rows = []
     for day in days_present:
@@ -455,9 +443,8 @@ def main():
                     {"day": day, "fold": fold, "motif": col, "response": val}
                 )
 
-    if tn5_rows:
+    if tn5_rows and args.save_plots:
         tn5_df = pd.DataFrame(tn5_rows)
-        n_days = len(days_present)
 
         fig, axes = plt.subplots(
             1, n_motifs, figsize=(2.5 * n_motifs, 3.5), sharey=True
@@ -497,12 +484,7 @@ def main():
         )
         fig.tight_layout()
         for ext in ("pdf", "png"):
-            fig.savefig(
-                out_dir / f"tn5_response.{ext}",
-                dpi=300,
-                bbox_inches="tight",
-                transparent=True,
-            )
+            fig.savefig(out_dir / f"tn5_response.{ext}")
         plt.close(fig)
 
     print(f"\nAll outputs written to: {out_dir}/")

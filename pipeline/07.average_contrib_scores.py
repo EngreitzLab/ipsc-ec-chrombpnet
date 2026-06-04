@@ -1,43 +1,42 @@
 #!/usr/bin/env python3
-# =============================================================================
-# 3.1.average_contrib_scores.py
-# Purpose: Average DeepLIFT contribution scores across all 5 cross-validation
-#          folds for a given day. This produces a single "average_shaps.counts.h5"
-#          per day with reduced fold-specific noise, for use in motif discovery
-#          (step 09) and pattern merging (step 5.3).
-#
-# Why average:
-#   Each fold's model was trained on a different 80% of peaks, so its
-#   contribution scores reflect slightly different random variation. Averaging
-#   cancels this noise while preserving the signal that is consistently
-#   important across all models.
-#
-# Input per fold:
-#   {full_model_dir_selected}/{day}_all_fold_{fold}/interpretation/
-#       interpretation.counts_scores.h5
-#
-#   Expected H5 keys (shape: n_peaks × 4 × seq_len):
-#       raw/seq             – one-hot encoded sequences (identical across folds)
-#       shap/seq            – hypothetical contribution scores
-#       projected_shap/seq  – projected contribution scores (used by MoDISco)
-#
-# Output:
-#   {averaged_dir}/{day}/{day}_average_shaps.counts.h5  (same key structure)
-#
-# Usage:
-#   python 3.1.average_contrib_scores.py \
-#       --day d0 \
-#       --folds 0 1 2 3 4 \
-#       --full-model-dir /path/to/chrombpnet_full_model_selected \
-#       --peak-type all \
-#       --out-dir /path/to/chrombpnet_averaged/d0
-# =============================================================================
+"""
+07.average_contrib_scores.py
+Average DeepLIFT contribution scores across all 5 cross-validation folds for
+a given day. Produces a single "average_shaps.counts.h5" per day with reduced
+fold-specific noise, for use in motif discovery (step 09) and pattern merging
+(step 11).
+
+Why average:
+  Each fold's model was trained on a different 80% of peaks, so its
+  contribution scores reflect slightly different random variation. Averaging
+  cancels this noise while preserving the signal that is consistently
+  important across all models.
+
+Input per fold:
+  {full_model_dir}/{day}_{peak_type}_fold_{fold}/interpretation/
+      interpretation.counts_scores.h5
+
+  Expected H5 keys (shape: n_peaks x 4 x seq_len):
+      raw/seq             - one-hot encoded sequences (identical across folds)
+      shap/seq            - hypothetical contribution scores
+      projected_shap/seq  - projected contribution scores (used by MoDISco)
+
+Output:
+  {averaged_dir}/{day}/{day}_average_shaps.counts.h5  (same key structure)
+
+Usage:
+  python 07.average_contrib_scores.py \\
+      --day d0 \\
+      --folds 0 1 2 3 4 \\
+      --full-model-dir results/full_models \\
+      --peak-type all \\
+      --out-dir results/contrib_scores/d0
+"""
 
 import argparse
 import os
 import sys
 
-import hdf5plugin  # registers blosc and other HDF5 compression filters
 import h5py
 import numpy as np
 

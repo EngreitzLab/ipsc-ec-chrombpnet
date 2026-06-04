@@ -71,7 +71,7 @@ echo "[$(date)] Running MotifCompendium (threshold=${motif_compendium_threshold}
 python "${SCRIPT_DIR}/11.motif_compendium.py" \
     --config    "${config_tsv}" \
     --out-dir   "${modisco_compiled_dir}" \
-    --ref-db    "${jaspar_meme}" \
+    --ref-db    "${ref_db_meme}" \
     --threshold "${motif_compendium_threshold}" \
     --cpus      "${SLURM_CPUS_PER_TASK:-16}"
 

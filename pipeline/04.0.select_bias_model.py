@@ -1,6 +1,5 @@
 """
-select_bias_model.py
-====================
+04.0.select_bias_model.py
 Select the best ChromBPNet Tn5 bias model per fold by evaluating
 bias_metrics.json files produced after 'chrombpnet bias pipeline'.
 
@@ -20,7 +19,7 @@ Per-fold selection:
   3. If still no candidate, pick the least-bad (highest peaks pearsonr).
 
 Usage (interactive or batch):
-  python 04.select_bias_model.py \
+  python 04.0.select_bias_model.py \
       --core-path /path/to/multiome_ipsc_ec \
       --biases 06 07 08 \
       --folds  0 1 2 3 4 \
@@ -32,13 +31,26 @@ import argparse
 import json
 from pathlib import Path
 
-import matplotlib
+import matplotlib as mpl
 
-matplotlib.use("Agg")
+mpl.use("Agg")
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+mpl.rcParams["axes.spines.top"] = False
+mpl.rcParams["axes.spines.right"] = False
+mpl.rcParams["font.size"] = 10
+mpl.rcParams["axes.labelsize"] = 10
+mpl.rcParams["axes.titlesize"] = 10
+mpl.rcParams["xtick.labelsize"] = 10
+mpl.rcParams["ytick.labelsize"] = 10
+mpl.rcParams["legend.fontsize"] = 10
+mpl.rcParams["figure.dpi"] = 100
+mpl.rcParams["savefig.dpi"] = 300
+mpl.rcParams["savefig.bbox"] = "tight"
+mpl.rcParams["savefig.transparent"] = True
 
 # ── thresholds ──────────────────────────────────────────────────────────────
 NONPEAKS_PEARSONR_PASS = 0.0  # must be > 0
@@ -170,7 +182,7 @@ METRIC_CONFIG = [
 
 
 def plot_metrics(
-    df: pd.DataFrame, selection: pd.DataFrame, out_path: Path
+    df: pd.DataFrame, selection: pd.DataFrame, out_stem: Path
 ) -> None:
     """
     Plot 1 – 4-panel grouped bar chart showing each key metric across
@@ -272,13 +284,14 @@ def plot_metrics(
         fontweight="bold",
     )
     fig.tight_layout()
-    fig.savefig(out_path, bbox_inches="tight", dpi=150)
+    for ext in ("pdf", "png"):
+        fig.savefig(out_stem.with_suffix(f".{ext}"))
     plt.close(fig)
-    print(f"Saved: {out_path}")
+    print(f"Saved: {out_stem}.pdf/.png")
 
 
 def plot_selection_heatmap(
-    df: pd.DataFrame, selection: pd.DataFrame, out_path: Path
+    df: pd.DataFrame, selection: pd.DataFrame, out_stem: Path
 ) -> None:
     """
     Plot 2 – Traffic-light heatmap.
@@ -433,9 +446,10 @@ def plot_selection_heatmap(
         y=1.02,
     )
     fig.tight_layout()
-    fig.savefig(out_path, bbox_inches="tight", dpi=150)
+    for ext in ("pdf", "png"):
+        fig.savefig(out_stem.with_suffix(f".{ext}"))
     plt.close(fig)
-    print(f"Saved: {out_path}")
+    print(f"Saved: {out_stem}.pdf/.png")
 
 
 # ── summary printing ──────────────────────────────────────────────────────────
@@ -483,19 +497,29 @@ def parse_args():
     )
     p.add_argument(
         "--core-path",
-        default="/oak/stanford/groups/engreitz/Users/opushkar/multiome_ipsc_ec",
+        required=True,
+        help="Project root directory (core_path in config.sh)",
     )
     p.add_argument("--biases", nargs="+", default=["06", "07", "08"])
     p.add_argument("--folds", nargs="+", default=["0", "1", "2", "3", "4"])
     p.add_argument("--day", default="d0")
     p.add_argument("--peak-type", default="all")
-    p.add_argument("--out-dir", default="../results/bias_models/selection")
+    p.add_argument(
+        "--out-dir",
+        default=None,
+        help="Output directory (default: <core-path>/results/plots/bias_model_selection)",
+    )
+    p.add_argument("--save-plots", action="store_true", default=True)
     return p.parse_args()
 
 
 def main():
     args = parse_args()
-    out_dir = Path(args.out_dir)
+    out_dir = (
+        Path(args.out_dir)
+        if args.out_dir
+        else Path(args.core_path) / "results" / "plots" / "bias_model_selection"
+    )
     out_dir.mkdir(parents=True, exist_ok=True)
 
     df = load_metrics(
@@ -518,10 +542,11 @@ def main():
     print(f"Tables written to {out_dir}/")
 
     # plots
-    plot_metrics(df, selection, out_dir / "bias_model_metrics.png")
-    plot_selection_heatmap(
-        df, selection, out_dir / "bias_model_selection_heatmap.png"
-    )
+    if args.save_plots:
+        plot_metrics(df, selection, out_dir / "bias_model_metrics")
+        plot_selection_heatmap(
+            df, selection, out_dir / "bias_model_selection_heatmap"
+        )
 
     print_summary(selection)
     print(f"All outputs in: {out_dir}/")

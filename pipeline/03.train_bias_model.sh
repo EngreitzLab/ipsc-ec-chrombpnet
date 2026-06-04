@@ -14,7 +14,7 @@
 #          bias_day (defined in config.sh). One SLURM array job per fold;
 #          each job trains all bias_factors sequentially for that fold.
 #
-# The resulting bias models are evaluated with qc_bias_selection.py, then the
+# The resulting bias models are evaluated with 04.1.qc_bias_selection.py, then the
 # best factor per fold is recorded in fold_bias_suffix in config.sh.
 #
 # Usage:

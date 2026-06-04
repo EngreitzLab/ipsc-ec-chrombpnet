@@ -22,9 +22,9 @@ genome_fa="${data_path}/hg38.fa"
 chrom_sizes="${data_path}/hg38.chrom.sizes"
 blacklist="${data_path}/blacklist.bed.gz"
 
-# JASPAR/MotifCompendium MEME database (used by step 11)
+# MotifCompendium reference database in MEME format (used by step 11)
 # Download from: https://github.com/kundajelab/MotifCompendium
-jaspar_meme="/oak/stanford/groups/engreitz/Users/opushkar/MotifCompendium/pipeline/data/MotifCompendium-Database-Human.meme.txt"
+ref_db_meme="/oak/stanford/groups/engreitz/Users/opushkar/MotifCompendium/pipeline/data/MotifCompendium-Database-Human.meme.txt"
 
 # Experiment parameters
 peak_type="all"

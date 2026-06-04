@@ -25,7 +25,7 @@ predictions. Contribution scores are averaged across cross-validation folds per
 timepoint to cancel fold-specific noise, and TF-MoDISco is run on the averaged scores
 to discover recurring high-importance sequence patterns (motifs). MotifCompendium then
 merges similar motifs across all timepoints into a unified non-redundant set and
-annotates them against JASPAR to assign TF names. Finally, Fi-NeMo searches this
+annotates them against the MotifCompendium reference database to assign TF names. Finally, Fi-NeMo searches this
 unified motif set against the averaged contribution scores of each day to call the
 genomic locations where each motif occurs. The result is a set of TF binding sites
 grounded in model-derived sequence importance rather than ChIP-seq.
@@ -37,7 +37,7 @@ grounded in model-derived sequence importance rather than ChIP-seq.
 ```
 Stage 1  Preprocess data              01, 02
 Stage 2  Train models                 03 -> 04 -> 05
-  QC     Inspect model quality        qc_bias_selection.py, qc_run_full_model.sh
+  QC     Inspect model quality        04.1.qc_bias_selection.py, 05.qc_run_full_model.sh
 Stage 3  Contribution scores          06
 Stage 3  Fold averaging               07, 08 (BigWig)
 Stage 3  MoDISco on averaged scores   09
@@ -85,7 +85,7 @@ sequence preferences without contamination from real TF binding signal.
 
 Output: `results/bias_models/bias_model{suffix}/{bias_day}_{peak_type}_fold_{fold}/`
 
-### `04.select_bias.sh` + `04.select_bias_model.py`
+### `04.select_bias.sh` + `04.0.select_bias_model.py` + `04.1.qc_bias_selection.py`
 Evaluates each candidate bias model using two key metrics:
 - **Non-peaks Pearson R**: how well the bias model explains Tn5 sequence preferences on
   held-out non-peak regions. Should be positive (> 0).
@@ -110,11 +110,11 @@ Output: `results/full_models/{day}_{peak_type}_fold_{fold}/`
 
 ## QC scripts (run after Stage 2)
 
-### `qc_bias_selection.py`
+### `04.1.qc_bias_selection.py`
 Detailed cross-fold comparison of models trained at different bias threshold values.
 Visualises bias metric distributions to support the selection made by `04.select_bias.sh`.
 
-### `qc_run_full_model.sh` + `qc_full_model.py`
+### `05.qc_run_full_model.sh` + `05.qc_full_model.py`
 Aggregates ChromBPNet evaluation metrics across all days and folds from the
 `evaluation/` subdirectories: counts Pearson/Spearman R, median JSD, and Tn5 motif
 response in the final bias-free model.
@@ -172,7 +172,7 @@ annotated against JASPAR.
 
 Note: the `modisco motifs` command in this script is commented out by default. Run it
 once to generate `modisco_counts_results.h5`, then comment it out to rerun only the
-report (JASPAR annotation) without repeating the expensive motif discovery step.
+report without repeating the expensive motif discovery step.
 
 Output: `results/contrib_scores/{day}/modisco/modisco_counts_results.h5`
 
@@ -226,7 +226,7 @@ Output: `results/compendium/modisco_compiled/`
 - `modisco_compiled.h5` — clustered motifs (input for step 12)
 - `modisco_compendium.meme` — MEME format export
 - `modisco_compendium.mc` — pickled MotifCompendium object for interactive inspection
-- `modisco_compendium_meta.tsv` — per-motif JASPAR annotations + cluster IDs
+- `modisco_compendium_meta.tsv` — per-motif TF annotations + cluster IDs
 - `modisco_config.tsv` — day to MoDISco H5 path mapping
 
 ### `12.run_finemo_unified.sh`
@@ -248,7 +248,7 @@ Output: `results/finemo_unified/{day}_{peak_type}/`
 - `hits.tsv` — full hit table with scores
 - `intermediate_inputs.npz` — extracted regions (input to Fi-NeMo)
 
-### `13.hits_to_bed.sh` + `13.hits_to_bed.py`
+### `analysis/13.hits_to_bed.sh` + `analysis/13.hits_to_bed.py`
 Converts per-day `hits.bed.gz` to BED9 format for visualisation in the IGV web app.
 
 **Output format**: BED9 with `itemRgb=On` track header. Each hit is rendered in IGV as
@@ -268,7 +268,7 @@ Output: `results/compendium/bed/{day}_{peak_type}_hits.bed`
 |---|---|---|---|
 | `motif_compendium_threshold` | 0.95 | Similarity cutoff for Leiden clustering in step 11 | Higher -> more clusters (finer splitting); lower -> more merging. TF family members may appear as separate clusters at 0.95. |
 | `finemo_alpha` | 0.8 | Fi-NeMo hit-calling significance level (step 12) | Lower -> more hits (higher FDR); higher -> fewer, more confident hits. ~1M hits/day at 0.8 is permissive — consider 0.7 or 0.6 to reduce noise. |
-| `min_annotation_score` | 0.7 | Minimum JASPAR similarity for TF name assignment (step 11) | Clusters below this appear unannotated (gray in IGV). May be real motifs absent from JASPAR, or degenerate composite patterns. |
+| `min_annotation_score` | 0.7 | Minimum similarity to reference database for TF name assignment (step 11) | Clusters below this appear unannotated (gray in IGV). May be real motifs absent from the reference database, or degenerate composite patterns. |
 | MoDISco seqlet p-value | default | Which positions within peaks seed seqlets (step 09) | Not explicitly set — MoDISco defaults apply. Permissive settings allow weak/noisy patterns into the compendium. |
 | MoDISco `-n` | 500,000 | Max seqlets used for motif discovery (step 09) | Limits runtime; if peaks x high-scoring positions exceed this, a random subset is used. |
 
@@ -316,7 +316,7 @@ results/
       modisco_compiled.h5             clustered motifs, input for Fi-NeMo (step 11)
       modisco_compendium.meme         MEME format export
       modisco_compendium.mc           pickled MotifCompendium object
-      modisco_compendium_meta.tsv     per-motif JASPAR annotations + cluster IDs
+      modisco_compendium_meta.tsv     per-motif TF annotations + cluster IDs
     bed/
       {day}_{peak_type}_hits.bed      BED9 with TF names + colors for IGV (step 13)
 
@@ -327,7 +327,7 @@ results/
       intermediate_inputs.npz
 
   plots/
-    full_model_qc/                    QC plots from qc_run_full_model.sh
+    full_model_qc/                    QC plots from 05.qc_run_full_model.sh
 ```
 
 ---
@@ -338,22 +338,21 @@ All commands are run from the `pipeline/` directory. Steps within each block can
 in parallel; blocks must complete in order.
 
 ```bash
-# Block 1: Data preparation
-bash 01.preprocess_peaks.sh
-bash 02.preprocess_nonpeaks.sh
+# Block 1: Data preparation (run from pipeline/ directory)
+srun --mem 100G --time 6:00:00 --partition engreitz bash 01.preprocess_peaks.sh
+srun --mem 100G --time 6:00:00 --partition engreitz bash 02.preprocess_nonpeaks.sh
 
 # Block 2: Bias model training
 sbatch 03.train_bias_model.sh
 
 # Block 3: Bias selection (after 03 completes)
 bash 04.select_bias.sh             # writes QC plots; update fold_bias_suffix in config.sh
-python qc_bias_selection.py        # optional: cross-fold visualisation
 
 # Block 4: Full model training
 sbatch 05.train_full_model.sh
 
 # Block 5: Model QC (optional, can run alongside Block 6)
-sbatch qc_run_full_model.sh        # produces results/plots/full_model_qc/
+sbatch 05.qc_run_full_model.sh     # produces results/plots/full_model_qc/
 
 # Block 6: Contribution scores (after 05 completes)
 sbatch 06.get_contrib_scores.sh
@@ -374,7 +373,7 @@ sbatch 11.motif_compendium.sh         # cluster + annotate -> modisco_compiled.h
 # Block 11: Unified hit calls (after 11 completes)
 sbatch 12.run_finemo_unified.sh       # cross-day comparable motif hits
 
-# Block 12: IGV visualisation (after 12 completes)
+# Block 12: IGV visualisation (after 12 completes; run from analysis/ directory)
 sbatch 13.hits_to_bed.sh              # BED9 files with TF colors for IGV
 ```
 

@@ -1,6 +1,5 @@
 """
-4.0-predict_and_avg.py
-======================
+10.predict_and_avg.py
 Generate genome-wide accessibility prediction bigwigs by averaging ChromBPNet
 model outputs across any number of folds.
 
@@ -13,44 +12,87 @@ Outputs (given --output-prefix PREFIX and --output-key KEY):
 """
 
 import argparse
-import numpy as np
-import pandas as pd
-import h5py
-import pyBigWig
-import pyfaidx
-import tensorflow as tf
-from tensorflow.keras.utils import get_custom_objects
-from tensorflow.keras.models import load_model
 
 import chrombpnet.evaluation.make_bigwigs.bigwig_helper as bigwig_helper
 import chrombpnet.training.utils.losses as losses
-import chrombpnet.training.utils.data_utils as data_utils
-import chrombpnet.training.utils.one_hot as one_hot
+import numpy as np
+import pandas as pd
+import pyfaidx
+import tensorflow as tf
+from tensorflow.keras.models import load_model
+from tensorflow.keras.utils import get_custom_objects
 
-NARROWPEAK_SCHEMA = ["chr", "start", "end", "1", "2", "3", "4", "5", "6", "summit"]
+NARROWPEAK_SCHEMA = [
+    "chr",
+    "start",
+    "end",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "summit",
+]
 
 
 def parse_args():
     p = argparse.ArgumentParser(
         description="Average ChromBPNet predictions across folds and write bigwig."
     )
-    p.add_argument("-cm", "--chrombpnet-model", type=str, action="append", required=True,
-                   help="Path to one chrombpnet model .h5 (repeat for each fold)")
-    p.add_argument("-r", "--regions", type=str, required=True,
-                   help="10-column narrowPeak BED file of prediction loci")
-    p.add_argument("-g", "--genome", type=str, required=True,
-                   help="Reference genome FASTA")
-    p.add_argument("-c", "--chrom-sizes", type=str, required=True,
-                   help="Chromosome sizes (2-column TSV)")
-    p.add_argument("--output-prefix", type=str, required=True,
-                   help="Output path prefix (no extension)")
-    p.add_argument("--output-key", type=str, required=True,
-                   help="Label inserted into output filenames (e.g. 'nobias' or 'uncorrected')")
+    p.add_argument(
+        "-cm",
+        "--chrombpnet-model",
+        type=str,
+        action="append",
+        required=True,
+        help="Path to one chrombpnet model .h5 (repeat for each fold)",
+    )
+    p.add_argument(
+        "-r",
+        "--regions",
+        type=str,
+        required=True,
+        help="10-column narrowPeak BED file of prediction loci",
+    )
+    p.add_argument(
+        "-g", "--genome", type=str, required=True, help="Reference genome FASTA"
+    )
+    p.add_argument(
+        "-c",
+        "--chrom-sizes",
+        type=str,
+        required=True,
+        help="Chromosome sizes (2-column TSV)",
+    )
+    p.add_argument(
+        "--output-prefix",
+        type=str,
+        required=True,
+        help="Output path prefix (no extension)",
+    )
+    p.add_argument(
+        "--output-key",
+        type=str,
+        required=True,
+        help="Label inserted into output filenames (e.g. 'nobias' or 'uncorrected')",
+    )
     p.add_argument("-b", "--batch-size", type=int, default=64)
-    p.add_argument("-ob", "--output-bed", type=bool, default=False,
-                   help="Write BED file with per-peak predicted log counts")
-    p.add_argument("-d", "--debug-chr", nargs="+", type=str, default=None,
-                   help="Restrict to specific chromosomes for debugging")
+    p.add_argument(
+        "-ob",
+        "--output-bed",
+        type=bool,
+        default=False,
+        help="Write BED file with per-peak predicted log counts",
+    )
+    p.add_argument(
+        "-d",
+        "--debug-chr",
+        nargs="+",
+        type=str,
+        default=None,
+        help="Restrict to specific chromosomes for debugging",
+    )
     return p.parse_args()
 
 
@@ -82,12 +124,18 @@ def main():
         inputlens.append(int(m.input_shape[1]))
         outputlens.append(int(m.output_shape[0][1]))
 
-    assert len(set(inputlens)) == 1,  "All models must share the same input length"
-    assert len(set(outputlens)) == 1, "All models must share the same output length"
-    inputlen  = inputlens[0]
+    assert len(set(inputlens)) == 1, (
+        "All models must share the same input length"
+    )
+    assert len(set(outputlens)) == 1, (
+        "All models must share the same output length"
+    )
+    inputlen = inputlens[0]
     outputlen = outputlens[0]
-    n_models  = len(models)
-    print(f"Loaded {n_models} model(s). inputlen={inputlen}, outputlen={outputlen}")
+    n_models = len(models)
+    print(
+        f"Loaded {n_models} model(s). inputlen={inputlen}, outputlen={outputlen}"
+    )
 
     # ------------------------------------------------------------------
     # Load regions and sequences
@@ -99,19 +147,21 @@ def main():
     with pyfaidx.Fasta(args.genome) as g:
         seqs, regions_used = bigwig_helper.get_seq(regions_df, g, inputlen)
 
-    gs      = bigwig_helper.read_chrom_sizes(args.chrom_sizes)
+    gs = bigwig_helper.read_chrom_sizes(args.chrom_sizes)
     regions = bigwig_helper.get_regions(args.regions, outputlen, regions_used)
 
     # Write the set of regions actually used
     regions_df[regions_used].to_csv(
         f"{args.output_prefix}_chrombpnet_{args.output_key}_preds.bed",
-        sep="\t", header=False, index=False
+        sep="\t",
+        header=False,
+        index=False,
     )
 
     # ------------------------------------------------------------------
     # Run inference, accumulate across models
     # ------------------------------------------------------------------
-    sum_logits    = None
+    sum_logits = None
     sum_logcounts = None
 
     for model in models:
@@ -121,25 +171,24 @@ def main():
         pred_logits = np.squeeze(pred_logits)
 
         if sum_logits is None:
-            sum_logits    = pred_logits.copy()
+            sum_logits = pred_logits.copy()
             sum_logcounts = pred_logcts.copy()
         else:
-            sum_logits    += pred_logits
+            sum_logits += pred_logits
             sum_logcounts += pred_logcts
 
-    avg_logits    = sum_logits    / n_models
+    avg_logits = sum_logits / n_models
     avg_logcounts = sum_logcounts / n_models
-    avg_prob      = softmax(avg_logits)
-    avg_counts    = np.expand_dims(np.exp(avg_logcounts)[:, 0], axis=1)
-    avg_profile   = avg_counts * avg_prob
+    avg_prob = softmax(avg_logits)
+    avg_counts = np.expand_dims(np.exp(avg_logcounts)[:, 0], axis=1)
+    avg_profile = avg_counts * avg_prob
 
     # ------------------------------------------------------------------
     # Write outputs
     # ------------------------------------------------------------------
     bw_out = f"{args.output_prefix}_chrombpnet_{args.output_key}.bw"
     bigwig_helper.write_bigwig(
-        avg_profile, regions, gs, bw_out,
-        debug_chr=args.debug_chr
+        avg_profile, regions, gs, bw_out, debug_chr=args.debug_chr
     )
     print(f"Wrote bigwig: {bw_out}")
 

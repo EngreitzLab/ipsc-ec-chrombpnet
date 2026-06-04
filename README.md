@@ -36,7 +36,7 @@ Edit `pipeline/config.sh`:
 - `core_path` is auto-detected from the script location; override only if needed
 - Place `hg38.fa`, `hg38.chrom.sizes`, and `blacklist.bed.gz` in `results/preprocessing/`
 - Set `CONDA_ENV`, `finemo_conda`, `motif_compendium_conda` to your conda environment paths
-- Set `jaspar_meme` to the path of `MotifCompendium-Database-Human.meme.txt`
+- Set `ref_db_meme` to the path of `MotifCompendium-Database-Human.meme.txt`
 
 ### 2. Run the pipeline
 
