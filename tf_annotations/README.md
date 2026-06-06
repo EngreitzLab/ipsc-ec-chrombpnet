@@ -1,1 +1,0 @@
-The motif_clusters_stats.html contains motif clustering statistics for reference. The patterns were annotated wrt https://github.com/kundajelab/MotifCompendium/blob/main/pipeline/data/MotifCompendium-Database-Human.meme.txt.
