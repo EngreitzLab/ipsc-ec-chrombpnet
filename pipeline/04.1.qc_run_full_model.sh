@@ -1,9 +1,9 @@
 #!/bin/bash
-# Run after step 05 (train_full_model.sh) to evaluate full model performance.
+# Run after step 04.0 (train_full_model.sh) to evaluate full model performance.
 #SBATCH --job-name=model_qc
 #SBATCH --mem=32G
 #SBATCH --time=2:00:00
-#SBATCH --partition=engreitz,normal
+#SBATCH --partition=normal
 #SBATCH --output=%x_%j.log
 #SBATCH --error=%x_%j.log
 
@@ -13,7 +13,7 @@ source "${SCRIPT_DIR}/config.sh"
 source "${CONDA_INIT}"
 conda activate "${CONDA_ENV}"
 
-python "${SCRIPT_DIR}/05.qc_full_model.py" \
+python "${SCRIPT_DIR}/qc_full_model.py" \
     --full-model-dir "${full_model_dir}" \
     --data-path "${data_path}" \
     --days "${days[@]}" \

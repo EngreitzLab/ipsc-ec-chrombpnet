@@ -4,13 +4,12 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
 #SBATCH --time=4:00:00
-#SBATCH --partition=gpu,owners
+#SBATCH --partition=gpu
 #SBATCH --array=0-4
 #SBATCH --output=%x_%j.log
 #SBATCH --error=%x_%j.log
 
-# =============================================================================
-# 10.generate_predictions.sh
+# 09.generate_predictions.sh
 # Purpose: Generate genome-wide accessibility prediction bigwigs for one day,
 #          averaged across all available trained folds.
 #          One SLURM array job per day.  Both bias-corrected and uncorrected
@@ -26,11 +25,10 @@
 #   <day>_avg_chrombpnet_uncorrected_preds_w_logcounts.bed
 #
 # Usage:
-#   sbatch 10.generate_predictions.sh            # all days (array 0-4)
-#   sbatch --array=0 10.generate_predictions.sh  # day 0 only
+#   sbatch 04.2.generate_predictions.sh            # all days (array 0-4)
+#   sbatch --array=0 04.2.generate_predictions.sh  # day 0 only
 #
-# Prerequisites: 05.train_full_model.sh must have completed.
-# =============================================================================
+# Prerequisites: 04.0.train_full_model.sh must have completed.
 
 SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 source "${SCRIPT_DIR}/config.sh"
@@ -66,7 +64,7 @@ for fold in "0" "1" "2" "3" "4"; do
 done
 
 if [[ ${#nobias_models[@]} -eq 0 ]]; then
-    echo "[${day}] No trained models found in ${full_model_dir}. Run 05.train_full_model.sh first." >&2
+    echo "[${day}] No trained models found in ${full_model_dir}. Run 04.0.train_full_model.sh first." >&2
     exit 1
 fi
 
@@ -96,14 +94,14 @@ for mode in "bias_corrected" "uncorrected"; do
 
     echo "[$(date)] [${day} ${mode}] Running predictions (${#models[@]} model(s))..."
 
-    python3 "${SCRIPT_DIR}/10.predict_and_avg.py" \
-        --regions       "${peaks_file}" \
-        --genome        "${genome_fa}" \
-        --chrom-sizes   "${chrom_sizes}" \
+    python "${SCRIPT_DIR}/predict_and_avg.py" \
+        --regions "${peaks_file}" \
+        --genome "${genome_fa}" \
+        --chrom-sizes "${chrom_sizes_bigwig}" \
         --output-prefix "${out_prefix}" \
-        --output-key    "${out_key}" \
-        --output-bed    True \
-        --batch-size    64 \
+        --output-key "${out_key}" \
+        --output-bed True \
+        --batch-size 64 \
         ${model_flags}
 
     echo "[$(date)] [${day} ${mode}] Done."

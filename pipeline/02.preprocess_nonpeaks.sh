@@ -1,15 +1,20 @@
 #!/bin/bash
+#SBATCH --job-name=preprocess_nonpeaks
+#SBATCH --mem=100G
+#SBATCH --time=6:00:00
+#SBATCH --partition=normal
+#SBATCH --output=%x_%j.log
+#SBATCH --error=%x_%j.log
+
 # 02.preprocess_nonpeaks.sh
 # Purpose: Generate GC-matched negative (non-peak) regions for each
-#          day x fold combination using 'chrombpnet prep nonpeaks'.
-#
-# Run interactively (no GPU needed):
-#   srun --mem 100G --time 6:00:00 --partition engreitz --pty bash
-#   source ${CONDA_INIT} && conda activate ${CONDA_ENV}
-#   bash 02.preprocess_nonpeaks.sh
+#   day x fold combination using 'chrombpnet prep nonpeaks'
 
 SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 source "${SCRIPT_DIR}/config.sh"
+
+source "${CONDA_INIT}"
+conda activate "${CONDA_ENV}"
 
 set -euo pipefail
 

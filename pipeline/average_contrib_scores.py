@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-07.average_contrib_scores.py
+average_contrib_scores.py
 Average DeepLIFT contribution scores across all 5 cross-validation folds for
-a given day. Produces a single "average_shaps.counts.h5" per day with reduced
-fold-specific noise, for use in motif discovery (step 09) and pattern merging
-(step 11).
+a given day. Produces a single "average_shaps.{score_type}.h5" per day with
+reduced fold-specific noise, for use in motif discovery (step 09) and pattern
+merging (step 11). Handles both the "counts" and "profile" contribution
+score heads via --score-type; the two H5 types share the same key structure.
 
 Why average:
   Each fold's model was trained on a different 80% of peaks, so its
@@ -14,7 +15,7 @@ Why average:
 
 Input per fold:
   {full_model_dir}/{day}_{peak_type}_fold_{fold}/interpretation/
-      interpretation.counts_scores.h5
+      interpretation.{score_type}_scores.h5
 
   Expected H5 keys (shape: n_peaks x 4 x seq_len):
       raw/seq             - one-hot encoded sequences (identical across folds)
@@ -22,14 +23,15 @@ Input per fold:
       projected_shap/seq  - projected contribution scores (used by MoDISco)
 
 Output:
-  {averaged_dir}/{day}/{day}_average_shaps.counts.h5  (same key structure)
+  {averaged_dir}/{day}/{day}_average_shaps.{score_type}.h5  (same key structure)
 
 Usage:
-  python 07.average_contrib_scores.py \\
+  python average_contrib_scores.py \\
       --day d0 \\
       --folds 0 1 2 3 4 \\
       --full-model-dir results/full_models \\
       --peak-type all \\
+      --score-type profile \\
       --out-dir results/contrib_scores/d0
 """
 
@@ -38,6 +40,7 @@ import os
 import sys
 
 import h5py
+import hdf5plugin  # noqa: F401  registers HDF5 compression filters
 import numpy as np
 
 
@@ -58,9 +61,15 @@ def parse_args():
     )
     p.add_argument("--peak-type", default="all")
     p.add_argument(
+        "--score-type",
+        default="counts",
+        choices=["counts", "profile"],
+        help="Which contribution score head to average (default: counts)",
+    )
+    p.add_argument(
         "--out-dir",
         required=True,
-        help="Output directory for average_shaps.counts.h5",
+        help="Output directory for average_shaps.{score-type}.h5",
     )
     return p.parse_args()
 
@@ -69,7 +78,9 @@ def main():
     args = parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
 
-    out_path = os.path.join(args.out_dir, f"{args.day}_average_shaps.counts.h5")
+    out_path = os.path.join(
+        args.out_dir, f"{args.day}_average_shaps.{args.score_type}.h5"
+    )
     if os.path.exists(out_path):
         print(f"Output already exists, skipping: {out_path}")
         return
@@ -81,7 +92,7 @@ def main():
             args.full_model_dir,
             f"{args.day}_{args.peak_type}_fold_{fold}",
             "interpretation",
-            "interpretation.counts_scores.h5",
+            f"interpretation.{args.score_type}_scores.h5",
         )
         if os.path.exists(h5_path):
             fold_h5s.append((fold, h5_path))
@@ -127,9 +138,7 @@ def main():
     with h5py.File(out_path, "w") as fh:
         fh.create_dataset("raw/seq", data=raw, compression="gzip")
         fh.create_dataset("shap/seq", data=avg_shap, compression="gzip")
-        fh.create_dataset(
-            "projected_shap/seq", data=avg_projected, compression="gzip"
-        )
+        fh.create_dataset("projected_shap/seq", data=avg_projected, compression="gzip")
 
     print("Done!")
 

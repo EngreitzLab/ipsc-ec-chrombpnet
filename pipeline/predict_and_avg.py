@@ -1,10 +1,10 @@
 """
-10.predict_and_avg.py
+predict_and_avg.py
 Generate genome-wide accessibility prediction bigwigs by averaging ChromBPNet
 model outputs across any number of folds.
 
-Adapted from the Greenleaf HDMA pipeline (08-predict_and_avg.py), with
-support for a variable number of folds (not hard-coded to 5).
+Adapted from the Greenleaf HDMA pipeline (https://doi.org/10.5281/zenodo.17298234, predict_and_avg.py)
+with support for a variable number of folds (not hard-coded to 5).
 
 Outputs (given --output-prefix PREFIX and --output-key KEY):
   PREFIX_chrombpnet_KEY.bw                    – predicted profile bigwig
@@ -124,18 +124,12 @@ def main():
         inputlens.append(int(m.input_shape[1]))
         outputlens.append(int(m.output_shape[0][1]))
 
-    assert len(set(inputlens)) == 1, (
-        "All models must share the same input length"
-    )
-    assert len(set(outputlens)) == 1, (
-        "All models must share the same output length"
-    )
+    assert len(set(inputlens)) == 1, "All models must share the same input length"
+    assert len(set(outputlens)) == 1, "All models must share the same output length"
     inputlen = inputlens[0]
     outputlen = outputlens[0]
     n_models = len(models)
-    print(
-        f"Loaded {n_models} model(s). inputlen={inputlen}, outputlen={outputlen}"
-    )
+    print(f"Loaded {n_models} model(s). inputlen={inputlen}, outputlen={outputlen}")
 
     # ------------------------------------------------------------------
     # Load regions and sequences
@@ -193,7 +187,9 @@ def main():
     print(f"Wrote bigwig: {bw_out}")
 
     if args.output_bed:
-        bed_out = f"{args.output_prefix}_chrombpnet_{args.output_key}_preds_w_logcounts.bed"
+        bed_out = (
+            f"{args.output_prefix}_chrombpnet_{args.output_key}_preds_w_logcounts.bed"
+        )
         df_used = regions_df[regions_used].copy()
         df_used.insert(10, "logcounts", avg_logcounts)
         df_used.to_csv(bed_out, sep="\t", header=False, index=False)

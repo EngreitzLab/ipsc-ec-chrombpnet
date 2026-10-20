@@ -29,9 +29,8 @@ import os
 import pickle
 import sys
 
-import MotifCompendium.utils.analysis as utils_analysis
-
 import MotifCompendium
+import MotifCompendium.utils.analysis as utils_analysis
 
 
 def parse_args():
@@ -85,9 +84,7 @@ def load_config(config_path):
                 continue
             parts = line.split("\t")
             if len(parts) != 2:
-                print(
-                    f"  [WARN] skipping malformed line: {line}", file=sys.stderr
-                )
+                print(f"  [WARN] skipping malformed line: {line}", file=sys.stderr)
                 continue
             day, h5_path = parts
             if not os.path.exists(h5_path):
@@ -109,27 +106,19 @@ def main():
     mc_out = os.path.join(args.out_dir, "modisco_compendium.mc")
     meta_out = os.path.join(args.out_dir, "modisco_compendium_meta.tsv")
 
-    # -------------------------------------------------------------------------
     # 1. Load MoDISco H5s
-    # -------------------------------------------------------------------------
     modisco_dict = load_config(args.config)
-    print(
-        f"@ loaded {len(modisco_dict)} MoDISco H5 paths: {list(modisco_dict.keys())}"
-    )
+    print(f"@ loaded {len(modisco_dict)} MoDISco H5 paths: {list(modisco_dict.keys())}")
     if not modisco_dict:
         sys.exit("ERROR: no valid MoDISco H5 files found in config.")
 
-    # -------------------------------------------------------------------------
     # 2. Build MotifCompendium (reads pos_patterns + neg_patterns from each H5)
-    # -------------------------------------------------------------------------
     MotifCompendium.set_compute_options(max_cpus=args.cpus, progress_bar=True)
     print("@ building MotifCompendium from MoDISco H5s...")
     mc = MotifCompendium.build_from_modisco(modisco_dict)
     print(f"@ {len(mc.metadata)} motifs loaded across all days")
 
-    # -------------------------------------------------------------------------
     # 3. Annotate individual motifs against reference database before clustering
-    # -------------------------------------------------------------------------
     print(f"@ annotating against reference database ({args.ref_db})...")
     utils_analysis.assign_label_from_pfms(
         mc,
@@ -140,9 +129,7 @@ def main():
     )
     print("@ annotation done")
 
-    # -------------------------------------------------------------------------
     # 4. Cluster at similarity threshold (Leiden community detection)
-    # -------------------------------------------------------------------------
     cluster_col = "cluster_id"
     print(f"@ clustering at similarity threshold {args.threshold}...")
     mc.cluster(similarity_threshold=args.threshold, save_name=cluster_col)
@@ -152,37 +139,27 @@ def main():
         f"(threshold={args.threshold})"
     )
 
-    # -------------------------------------------------------------------------
     # 5. Export clustered modisco H5 for FiNeMo (step 12)
     #    One averaged pattern per cluster; written to modisco_compiled.h5 so
     #    12.run_finemo_unified.sh needs no changes.
-    # -------------------------------------------------------------------------
     print(f"@ exporting clustered modisco H5 → {h5_out}")
     utils_analysis.export_compendium_clustered_modisco(mc, cluster_col, h5_out)
     print(f"@ modisco_compiled.h5 written ({n_clusters} patterns)")
 
-    # -------------------------------------------------------------------------
     # 6. Export MEME format — cluster averages, matching the H5 content
-    # -------------------------------------------------------------------------
     print(f"@ exporting MEME → {meme_out}")
     mc_avg = mc.cluster_averages(
         clustering=cluster_col, aggregations=[], weight_col=None
     )
-    utils_analysis.export_compendium_meme(
-        mc_avg, meme_out, name_col="source_cluster"
-    )
+    utils_analysis.export_compendium_meme(mc_avg, meme_out, name_col="source_cluster")
 
-    # -------------------------------------------------------------------------
     # 7. Save MotifCompendium object (for interactive inspection / re-analysis)
-    # -------------------------------------------------------------------------
     print(f"@ saving MotifCompendium object → {mc_out}")
     with open(mc_out, "wb") as fh:
         pickle.dump(mc, fh)
 
-    # -------------------------------------------------------------------------
     # 8. Save full metadata TSV (motif names, source day, TF annotations,
     #    cluster IDs)
-    # -------------------------------------------------------------------------
     mc.metadata.to_csv(meta_out, sep="\t", index=False)
     print(f"@ metadata TSV → {meta_out} ({len(mc.metadata)} rows)")
 

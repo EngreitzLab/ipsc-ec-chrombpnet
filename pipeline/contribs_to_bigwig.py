@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-08.contribs_to_bigwig.py
-Convert the fold-averaged contribution score H5 produced by
-07.average_contrib_scores.py into a bigwig file.
+contribs_to_bigwig.py
+Convert the fold-averaged contribution score H5 produced by average_contrib_scores.py
+into a bigwig file.
 
 The averaged H5 stores projected_shap/seq with shape (N, 4, seqlen).
 Summing over the 4-base axis yields the per-position contribution score
@@ -18,11 +18,11 @@ Output:
   {averaged_dir}/{day}/{day}_average_shaps.counts.bw
 
 Usage:
-  python 08.contribs_to_bigwig.py \\
-      --h5          results/contrib_scores/d0/d0_average_shaps.counts.h5 \\
-      --regions     results/full_models/d0_all_fold_0/interpretation/interpretation.interpreted_regions.bed \\
+  python contribs_to_bigwig.py \\
+      --h5 results/contrib_scores/d0/d0_average_shaps.counts.h5 \\
+      --regions results/full_models/d0_all_fold_0/interpretation/interpretation.interpreted_regions.bed \\
       --chrom-sizes results/preprocessing/hg38.chrom.sizes \\
-      --output-bw   results/contrib_scores/d0/d0_average_shaps.counts.bw
+      --output-bw results/contrib_scores/d0/d0_average_shaps.counts.bw
 """
 
 import argparse
@@ -35,18 +35,14 @@ import numpy as np
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument(
-        "--h5", required=True, help="Path to average_shaps.counts.h5"
-    )
+    p.add_argument("--h5", required=True, help="Path to average_shaps.counts.h5")
     p.add_argument(
         "--regions",
         required=True,
         help="10-column BED file of interpreted regions "
         "(interpretation.interpreted_regions.bed from any fold)",
     )
-    p.add_argument(
-        "--chrom-sizes", required=True, help="Chromosome sizes 2-column TSV"
-    )
+    p.add_argument("--chrom-sizes", required=True, help="Chromosome sizes 2-column TSV")
     p.add_argument("--output-bw", required=True, help="Output bigwig path")
     p.add_argument(
         "--debug-chr",
@@ -70,9 +66,7 @@ def main():
 
     seqlen = projected.shape[2]
     assert seqlen % 2 == 0, f"seqlen must be even, got {seqlen}"
-    print(
-        f"  Shape: {projected.shape}  (N={projected.shape[0]}, seqlen={seqlen})"
-    )
+    print(f"  Shape: {projected.shape}  (N={projected.shape[0]}, seqlen={seqlen})")
 
     # Sum over 4 bases → per-position contribution score  (N, seqlen)
     scores = projected.sum(axis=1).astype(np.float32)

@@ -1,17 +1,20 @@
 #!/bin/bash
+#SBATCH --job-name=preprocess_peaks
+#SBATCH --mem=100G
+#SBATCH --time=6:00:00
+#SBATCH --partition=normal
+#SBATCH --output=%x_%j.log
+#SBATCH --error=%x_%j.log
+
 # 01.preprocess_peaks.sh
 # Purpose: Remove blacklisted regions from peak files and reformat to
-#          narrowPeak for chrombpnet (summit = midpoint of peak).
-#
-# Run interactively:
-#   srun --mem 100G --time 6:00:00 --partition engreitz --pty bash
-#   source ${CONDA_INIT} && conda activate ${CONDA_ENV}
-#   ml biology && ml bedtools/2.30.0
-#   bash 01.preprocess_peaks.sh
+#   narrowPeak for chrombpnet (summit = midpoint of peak)
+
+ml biology
+ml bedtools/2.30.0
 
 SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 source "${SCRIPT_DIR}/config.sh"
-
 set -euo pipefail
 
 mkdir -p "${data_path}"
@@ -33,7 +36,7 @@ for day in "${days[@]}"; do
     # Remove peaks overlapping (slopped) blacklist
     bedtools intersect \
         -v \
-        -a "${core_path}/data/${day}_${peak_type}_peaks.bed" \
+        -a "${peaks_path}/${day}/Peaks/macs2_peaks.narrowPeak.sorted.candidateRegions.bed" \
         -b "${data_path}/blacklist_slop.bed" \
         > "${data_path}/${day}/${day}_${peak_type}_peaks_no_blacklist.bed"
 

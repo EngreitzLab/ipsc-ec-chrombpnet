@@ -1,5 +1,5 @@
 """
-05.qc_full_model.py
+qc_full_model.py
 Visualize ChromBPNet full-model performance metrics across all days and folds.
 
 Reads from <full_model_dir>/<day>_<peak_type>_fold_<fold>/:
@@ -18,9 +18,9 @@ Produces:
 Run after step 05 (train_full_model.sh) via 05.qc_run_full_model.sh.
 
 Usage:
-  python 05.qc_full_model.py \\
+  python qc_full_model.py \\
       --full-model-dir ../results/full_models \\
-      --data-path      ../results/preprocessing \\
+      --data-path ../results/preprocessing \\
       --days d0 d1 d2 d3 d4 \\
       --folds 0 1 2 3 4 \\
       --peak-type all \\
@@ -35,26 +35,25 @@ import sys
 from pathlib import Path
 
 import matplotlib
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from scipy.stats import pearsonr, spearmanr
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 
 matplotlib.rcParams["axes.spines.top"] = False
 matplotlib.rcParams["axes.spines.right"] = False
-matplotlib.rcParams["font.size"] = 10
-matplotlib.rcParams["axes.labelsize"] = 10
-matplotlib.rcParams["axes.titlesize"] = 10
-matplotlib.rcParams["xtick.labelsize"] = 10
-matplotlib.rcParams["ytick.labelsize"] = 10
-matplotlib.rcParams["legend.fontsize"] = 10
+matplotlib.rcParams["font.size"] = 14
+matplotlib.rcParams["axes.labelsize"] = 14
+matplotlib.rcParams["axes.titlesize"] = 14
+matplotlib.rcParams["xtick.labelsize"] = 14
+matplotlib.rcParams["ytick.labelsize"] = 14
+matplotlib.rcParams["legend.fontsize"] = 14
 matplotlib.rcParams["figure.dpi"] = 100
 matplotlib.rcParams["savefig.dpi"] = 300
 matplotlib.rcParams["savefig.bbox"] = "tight"
 matplotlib.rcParams["savefig.transparent"] = True
-
-import numpy as np
-import pandas as pd
-from scipy.stats import pearsonr, spearmanr
 
 # Test chromosomes per fold (standard ChromBPNet splits)
 TEST_CHROMS = {
@@ -141,12 +140,8 @@ def load_pred_obs_counts(
     mask = np.isin(chroms, test_chroms)
     pred_logcts = pred_logcts[mask]
 
-    peaks_df = pd.read_csv(
-        filtered_peaks_bed, sep="\t", names=NARROWPEAK_SCHEMA
-    )
-    peaks_df = peaks_df[peaks_df["chr"].isin(test_chroms)].reset_index(
-        drop=True
-    )
+    peaks_df = pd.read_csv(filtered_peaks_bed, sep="\t", names=NARROWPEAK_SCHEMA)
+    peaks_df = peaks_df[peaks_df["chr"].isin(test_chroms)].reset_index(drop=True)
 
     bw_file = (
         Path(full_model_dir)
@@ -155,9 +150,7 @@ def load_pred_obs_counts(
         / "data_unstranded.bw"
     )
     if not bw_file.exists():
-        print(
-            f"  Warning: observed BigWig not found: {bw_file}", file=sys.stderr
-        )
+        print(f"  Warning: observed BigWig not found: {bw_file}", file=sys.stderr)
         return None, pred_logcts.flatten()
 
     try:
@@ -167,9 +160,7 @@ def load_pred_obs_counts(
         obs_logcts = np.log(np.sum(obs_data, axis=-1) + 1)
         return obs_logcts, pred_logcts.flatten()
     except Exception as e:
-        print(
-            f"  Warning: could not load observed counts: {e}", file=sys.stderr
-        )
+        print(f"  Warning: could not load observed counts: {e}", file=sys.stderr)
         return None, pred_logcts.flatten()
 
 
@@ -206,19 +197,23 @@ def box_with_points(ax, labels, group_values, ylabel, title, ylim=None):
             rasterized=True,
         )
         median_val = np.median(vals)
+        transform = matplotlib.transforms.blended_transform_factory(
+            ax.transData, ax.transAxes
+        )
         ax.text(
             xi,
-            max(vals) + 0.01,
+            1.0,
             f"median={median_val:.2f}\nn={len(vals)}",
             ha="center",
             va="bottom",
-            fontsize=7,
+            fontsize=10,
+            transform=transform,
         )
 
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, fontsize=12)
-    ax.set_ylabel(ylabel, fontsize=12)
-    ax.set_title(title, fontsize=12)
+    ax.set_xticklabels(labels)
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
     if ylim:
         ax.set_ylim(*ylim)
 
@@ -287,9 +282,7 @@ def main():
             eval_dir = Path(args.full_model_dir) / tag / "evaluation"
 
             metrics_path = eval_dir / "chrombpnet_metrics.json"
-            bias_resp_path = (
-                eval_dir / "chrombpnet_nobias_max_bias_response.txt"
-            )
+            bias_resp_path = eval_dir / "chrombpnet_nobias_max_bias_response.txt"
             pred_h5_path = eval_dir / "chrombpnet_predictions.h5"
             peaks_bed = (
                 Path(args.data_path)
@@ -361,11 +354,9 @@ def main():
                         if args.save_plots:
                             fig, ax = plt.subplots(figsize=(5, 5))
                             density_scatter(ax, obs_ok, pred_ok)
-                            ax.set_xlabel(
-                                "Observed log(counts + 1)", fontsize=12
-                            )
-                            ax.set_ylabel("Predicted log-counts", fontsize=12)
-                            ax.set_title(f"{day} fold {fold}", fontsize=12)
+                            ax.set_xlabel("Observed log(counts + 1)")
+                            ax.set_ylabel("Predicted log-counts")
+                            ax.set_title(f"{day} fold {fold}")
                             ax.text(
                                 0.05,
                                 0.95,
@@ -376,9 +367,7 @@ def main():
                             )
                             fig.tight_layout()
                             for ext in ("pdf", "png"):
-                                fig.savefig(
-                                    out_dir / f"{day}_fold{fold}_scatter.{ext}"
-                                )
+                                fig.savefig(out_dir / f"{day}_fold{fold}_scatter.{ext}")
                             plt.close(fig)
                 except Exception as e:
                     print(f"[{tag}] Scatter plot failed: {e}", file=sys.stderr)
@@ -427,9 +416,7 @@ def main():
     tn5_rows = []
     for day in days_present:
         for fold in args.folds:
-            row_match = metrics_df[
-                (metrics_df.day == day) & (metrics_df.fold == fold)
-            ]
+            row_match = metrics_df[(metrics_df.day == day) & (metrics_df.fold == fold)]
             if row_match.empty:
                 continue
             for i in range(1, n_motifs + 1):
@@ -452,13 +439,9 @@ def main():
         if n_motifs == 1:
             axes = [axes]
 
-        for ax, motif in zip(
-            axes, [f"tn5_{i}" for i in range(1, n_motifs + 1)]
-        ):
+        for ax, motif in zip(axes, [f"tn5_{i}" for i in range(1, n_motifs + 1)]):
             sub = tn5_df[tn5_df.motif == motif]
-            vals_by_day = [
-                sub[sub.day == d]["response"].values for d in days_present
-            ]
+            vals_by_day = [sub[sub.day == d]["response"].values for d in days_present]
             box_with_points(
                 ax,
                 days_present,
@@ -476,10 +459,10 @@ def main():
             )
             ax.tick_params(axis="x", labelrotation=45)
 
-        axes[0].legend(fontsize=7)
+        axes[0].legend(fontsize=10)
         fig.suptitle(
             "Tn5 motif response in chrombpnet_nobias\n(low = bias well factorized)",
-            fontsize=10,
+            fontsize=14,
             y=1.02,
         )
         fig.tight_layout()
