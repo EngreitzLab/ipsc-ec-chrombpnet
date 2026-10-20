@@ -1,8 +1,10 @@
 # results: all model outputs, contribution scores, hit calls
 results/
 
-# analysis: excluded per project scope
-analysis/
+# analysis outputs: keep scripts, ignore per-script output folders
+analysis/*/
+!analysis/src/
+analysis/slurm-*.out
 
 # large input data
 data/bams/

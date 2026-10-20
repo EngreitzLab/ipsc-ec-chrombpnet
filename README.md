@@ -9,7 +9,7 @@ differentiation timepoints (d0–d4), followed by motif discovery and TF activit
 
 ```
 pipeline/          ChromBPNet workflow: preprocessing -> training -> motif discovery
-analysis/          Downstream scientific analyses: TF activity, gene-motif linking, TEAD enrichment
+analysis/          Downstream analyses: QC, motif annotation, gene-motif linking, TF motif enrichment in cNMF programs
 data/              Input data: BAMs, peak BED files, scE2G links
 data/folds/        Cross-validation fold definitions (JSON) used by the pipeline
 ```
@@ -34,8 +34,10 @@ results/plots/                QC and analysis output plots
 
 Edit `pipeline/config.sh`:
 - `core_path` is auto-detected from the script location; override only if needed
-- Place `hg38.fa`, `hg38.chrom.sizes`, and `blacklist.bed.gz` in `results/preprocessing/`
-- Set `CONDA_ENV`, `finemo_conda`, `motif_compendium_conda` to your conda environment paths
+- Edit `pipeline/dataset_config.sh` for days, folds, and input peak/fragment paths
+- Place `hg38.fa`, `hg38.chrom.sizes`, and `blacklist.bed.gz` in `genome/`
+- `#SBATCH` partition/QOS lines are generic (`normal`, `gpu`); adjust them for your cluster
+- Set `CONDA_INIT`, `CONDA_ENV`, `finemo_conda`, `motif_compendium_conda` to your conda paths (envs in `envs/`)
 - Set `ref_db_meme` to the path of `MotifCompendium-Database-Human.meme.txt`
 
 ### 2. Run the pipeline
@@ -49,38 +51,43 @@ cd pipeline/
 bash 01.preprocess_peaks.sh
 bash 02.preprocess_nonpeaks.sh
 
-# Stage 2: Train bias model, select best, train full model
-sbatch 03.train_bias_model.sh
-bash 04.select_bias.sh          # after 03 completes; updates fold_bias_suffix in config.sh
-sbatch 05.train_full_model.sh
+# Stage 2: Train bias models, select per fold, QC, train full model
+sbatch 03.0.train_bias_model.sh
+bash 03.1.select_bias.sh            # after 03.0; update fold_bias_suffix in dataset_config.sh
+sbatch 03.2.qc_selected_bias.sh
+sbatch 04.0.train_full_model.sh
+sbatch 04.1.qc_run_full_model.sh    # optional model QC
+sbatch 04.2.generate_predictions.sh # optional predicted-accessibility BigWigs
 
-# Stage 3: Contribution scores, averaging, MoDISco
-sbatch 06.get_contrib_scores.sh
-sbatch 07.average_contrib_scores.sh
-sbatch 08.contribs_to_bigwig.sh
-sbatch 09.run_modisco.sh
+# Stage 3: Contribution scores, fold averaging, MoDISco
+sbatch 05.get_contrib_scores.sh
+sbatch 06.average_contrib_scores.sh
+sbatch 07.contribs_to_bigwig.sh
+sbatch 08.run_modisco.sh
 
-# Stage 4 (optional): Predicted accessibility BigWigs
-sbatch 10.generate_predictions.sh
-
-# Stage 5: Unified motif compendium and hit calling
-sbatch 11.motif_compendium.sh
-sbatch 12.run_finemo_unified.sh
-sbatch 13.hits_to_bed.sh
+# Stage 4: Unified motif compendium and hit calling (counts head)
+sbatch 09.motif_compendium.sh
+sbatch 10.run_finemo_unified.sh
+sbatch 11.postprocess_finemo.sh
+# Profile-head variants: 09.1.motif_compendium_profile.sh,
+# 10.1.run_finemo_unified_profile.sh, 11.1.postprocess_finemo_profile.sh
 ```
 
 See `pipeline/README.md` for full documentation.
 
 ### 3. Run downstream analyses
 
-Scripts in `analysis/` are numbered sequentially and run independently:
+Scripts in `analysis/` are numbered in run order:
 
 ```bash
 cd analysis/
-python 01.pattern_logos.py           # CWM logos for all motif clusters
-python 02.gene_motif_linking.py      # TF scores linked to genes via scE2G
-python 08.tf_activity.py             # TF activity heatmaps and dynamics across days
-python 05.tead_enrichment.py         # TEAD motif enrichment in cNMF programs
+python 00.chrombpnet_model_qc.py      # model and data QC
+python 0.0.motif_id_annotation.py     # TF annotation of compendium motifs
+python 0.2.finemo_hit_qc.py           # CWM-similarity filtering of hits
+sbatch 0.3.hits_to_bed.sh             # IGV tracks
+python 1.0.gene_motif_linking.py      # TF scores linked to genes via scE2G
+python 2.tf_enrichment_in_programs.py # TF motif enrichment in cNMF programs
+python 3.chrombpnet_figures.py        # figures for programs of interest
 ```
 
 See `analysis/README.md` for full documentation.
