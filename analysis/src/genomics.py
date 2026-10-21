@@ -4,7 +4,9 @@ import pandas as pd
 import pybedtools
 
 
-def intersect_hits_peaks(hits_df: pd.DataFrame, peaks_df: pd.DataFrame) -> pd.DataFrame:
+def intersect_hits_peaks(
+    hits_df: pd.DataFrame, peaks_df: pd.DataFrame, hit_fully_inside: bool = False
+) -> pd.DataFrame:
     """
     Intersect hits with peaks using pybedtools.
 
@@ -13,6 +15,8 @@ def intersect_hits_peaks(hits_df: pd.DataFrame, peaks_df: pd.DataFrame) -> pd.Da
     hits_df  : must have columns chr, start, end (plus any extra hit columns)
     peaks_df : must have columns chr, start, end (plus any peak metadata columns
                e.g. TargetGene, TargetGeneTSS, ABC.Score, E2G.Score.qnorm)
+    hit_fully_inside : True keeps only hits lying entirely inside a peak
+               (bedtools intersect -f 1.0); False (default) keeps any 1 bp overlap
 
     Returns
     -------
@@ -35,7 +39,8 @@ def intersect_hits_peaks(hits_df: pd.DataFrame, peaks_df: pd.DataFrame) -> pd.Da
         ]
     )
 
-    intersected = hits_bed.intersect(peaks_bed, wa=True, wb=True)
+    overlap_kwargs = {"f": 1.0} if hit_fully_inside else {}
+    intersected = hits_bed.intersect(peaks_bed, wa=True, wb=True, **overlap_kwargs)
 
     if len(intersected) == 0:
         return pd.DataFrame()

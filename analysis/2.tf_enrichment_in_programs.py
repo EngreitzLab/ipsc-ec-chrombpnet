@@ -6,27 +6,38 @@ For every (program, day, tf) combination, restricted to distal enhancer
 elements only (single element_type, so BH correction below is over one test
 family -- no separate per-element-type families to (incorrectly) union
 afterward):
-  - Foreground : top n_top_genes by cNMF program loading
-  - Background : remaining E2G-linked genes in the cNMF universe for that TF/day
+  - Question   : among genes that carry the TF's motif in that day's linked
+                 enhancers, do the program's top genes score higher?
+  - Carriers   : cNMF genes with weighted_score > 0 for the TF on that day
+                 (>= 1 pos_patterns hit in a linked enhancer); genes without a
+                 hit are not part of the test
+  - Foreground : carriers among the top n_top_genes by cNMF program loading
+  - Background : all other carriers of the TF on that day
+  - Filter     : tests with fewer than min_carriers_per_group carriers in the
+                 foreground or background are not run. The filter uses only who
+                 carries the motif, not the scores, so the conditional test
+                 stays valid
   - Test       : one-sided Mann-Whitney U (alternative='greater').
-                 H0: TF importance scores for top-N genes are drawn from the
-                 same distribution as TF importance scores of other genes.
-                 Ha: TF importance scores are higher for top-N genes.
-                 method='auto' lets scipy pick 'exact' for small/tie-free
-                 samples rather than forcing the asymptotic approximation
-                 (real per-TF universes here run as low as single digits).
-  - Correction : Benjamini-Hochberg
+                 H0: among carriers, scores of top genes and of other genes are
+                 drawn from the same distribution.
+                 Ha: among carriers, top genes score higher.
+                 Scores are continuous and > 0 (no tied zeros), so scipy's
+                 method='auto' asymptotic approximation is well calibrated
+                 (checked on random 300-gene sets, d3, 2026-10-21)
+  - Correction : Benjamini-Hochberg over all tests run
+  Before 2026-10-21 the test was zero-filled (all genes with >= 1 hit of any TF,
+  missing = 0). That mixes motif presence with score, its p-values were
+  anti-conservative for rare motifs (~87% tied zeros), and presence tracks the
+  number of linked enhancers.
 
 Outputs
 -------
   analysis/2.tf_enrichment_in_programs/
     {et}_enrichment_results.tsv
     plots/
-      tf_program_count_heatmap.{pdf,png}       TFs x days: # programs enriched per TF
-      program_tf_count_heatmap.{pdf,png}       programs x days: # TFs enriched per program
-      per_program/{prog_name}.{pdf,png}        significant TFs x days per program
-      poi_by_day_clustermap_{day}_{et}.{pdf,png}  clustered TFs x POI programs, per day
-      tf_rank_scatter_{day}.{pdf,png}          TF rank scatter for programs of interest
+      poi_by_day_clustermap_{day}_{et}.{pdf,png,_data.tsv}  clustered TFs x POI programs,
+                                                            per day
+  (TF rank scatter for the programs of interest: 3.chrombpnet_figures.py)
 """
 
 # %%
@@ -57,7 +68,7 @@ cnmf_h5mu = (
 data_dir = os.path.join(core_path, "analysis", "1.0.gene_motif_linking", "data")
 output_dir = os.path.join(core_path, "analysis", "2.tf_enrichment_in_programs")
 plots_dir = os.path.join(output_dir, "plots")
-os.makedirs(os.path.join(plots_dir, "per_program"), exist_ok=True)
+os.makedirs(plots_dir, exist_ok=True)
 
 # Must match values used in 1.0.gene_motif_linking.py
 weight_strategy = "e2g"
@@ -70,7 +81,11 @@ hit_score_col = "hit_coefficient_global"  # "hit_importance", "hit_coefficient_g
 element_types = ["enhancer"]
 
 n_top_genes = 300  # foreground: top N genes per cNMF program
+# Minimum motif carriers in the foreground and in the background for a test to run
+min_carriers_per_group = 5
 days = ["d0", "d1", "d2", "d3"]
+# BH q cutoff for the one-sided (enrichment) test; the direction is fixed in
+# advance, so q < 0.05 controls the FDR of enrichment calls at 5%
 q_sig_threshold = 0.05
 
 # Programs of interest and the day each is most relevant
@@ -82,8 +97,6 @@ poi_prog_day = [
     (27, "d3"),
     (34, "d3"),
 ]
-# Element type used for per-program clustermaps and TF rank scatter
-primary_et = "enhancer"
 
 save_plots = True
 
@@ -93,7 +106,7 @@ save_plots = True
 # gene-motif score tables, or the full test sweep. Set to False to recompute
 # from scratch (required if n_top_genes, days, element_types, weight_strategy
 # or hit_score_col change).
-reuse_enrichment = True
+reuse_enrichment = False  # 1.0 scores changed (per-day links, hits fully inside)
 
 # Layout for the programs-of-interest clustermaps (Plot 3). seaborn's
 # clustermap builds its own figure, so the figure is sized from the cell grid
@@ -144,7 +157,7 @@ def mark_significant(ax, qval_matrix, rows, cols, fontsize=6):
                 label = "***"
             elif q < 0.01:
                 label = "**"
-            elif q < 0.05:
+            elif q < q_sig_threshold:
                 label = "*"
             else:
                 label = ""
@@ -197,52 +210,59 @@ for et in compute_ets:
     )
 
 # %%
-# Build gene x day score matrix per (element type, TF)
-# Universe: genes with E2G links for that TF on that day AND in the cNMF matrix
-scores_by_tf = {}
+# Gene x TF score matrix per (element type, day); 0 marks genes without a hit of the
+# TF (not carriers), which are left out of that TF's test below
+score_matrices = {}
 for et in compute_ets:
     if et not in all_scores:
         continue
-    scores_by_tf[et] = {}
-    df = all_scores[et][all_scores[et]["day"].isin(days)]
-    for tf, tf_group in df.groupby("tf_motif_id"):
-        tf_df = tf_group.pivot_table(
+    score_matrices[et] = {}
+    df = all_scores[et]
+    # Negative scores mean neg_patterns hits, which the one-sided test cannot handle
+    if (df["weighted_score"] < 0).any():
+        raise ValueError(
+            f"{et}: negative weighted_score found; rerun 1.0.gene_motif_linking.py "
+            "with pattern_prefixes = ('pos_patterns',)"
+        )
+    df = df[df["day"].isin(days) & df["TargetGene"].isin(all_cnmf_genes)]
+    for day in days:
+        mat = df[df["day"] == day].pivot_table(
             index="TargetGene",
-            columns="day",
+            columns="tf_motif_id",
             values="weighted_score",
             aggfunc="sum",
-        ).reindex(columns=days)
-        tf_df = tf_df[tf_df.index.isin(all_cnmf_genes)]
-        scores_by_tf[et][tf] = tf_df
-    print(f"  {et}: {len(scores_by_tf[et])} TFs built")
+            fill_value=0.0,
+        )
+        score_matrices[et][day] = mat
+        n_carriers = (mat > 0).sum(axis=0)
+        print(
+            f"  {et} {day}: {mat.shape[1]} TFs; carriers per TF median "
+            f"{int(n_carriers.median()):,} (range {n_carriers.min():,}-{n_carriers.max():,})"
+        )
 
 # %%
-# Run Mann-Whitney U enrichment for all (program, day, tf)
-# H1 (alternative='greater'): top-N genes have higher TF scores than background
+# Run Mann-Whitney U among motif carriers for all (program, day, tf)
+# H1 (alternative='greater'): among carriers, top-N genes have higher TF scores
 all_results = {}
 for et in compute_ets:
-    if et not in scores_by_tf:
+    if et not in score_matrices:
         continue
-    tfs = list(scores_by_tf[et].keys())
-    n_tests = n_programs * len(days) * len(tfs)
+    n_candidates = n_programs * sum(m.shape[1] for m in score_matrices[et].values())
     print(
-        f"\n  [{et}] {n_programs} programs x {len(days)} days x {len(tfs)} TFs"
-        f" = {n_tests:,} tests ..."
+        f"\n  [{et}] {n_programs} programs x {len(days)} days: {n_candidates:,} candidate tests ..."
     )
 
     records = []
     for prog_idx, prog_name in enumerate(program_loadings.index):
         top_genes_set = set(program_loadings.loc[prog_name].nlargest(n_top_genes).index)
-        for tf in tfs:
-            for day in days:
-                day_scores = scores_by_tf[et][tf][day].dropna()
-                fg = day_scores[
-                    [g for g in day_scores.index if g in top_genes_set]
-                ].values
-                bg = day_scores[
-                    [g for g in day_scores.index if g not in top_genes_set]
-                ].values
-                if len(fg) == 0 or len(bg) == 0:
+        for day, mat in score_matrices[et].items():
+            is_top = mat.index.isin(top_genes_set)
+            for tf in mat.columns:
+                values = mat[tf].to_numpy()
+                carrier = values > 0
+                fg = values[carrier & is_top]
+                bg = values[carrier & ~is_top]
+                if len(fg) < min_carriers_per_group or len(bg) < min_carriers_per_group:
                     continue
                 u_stat, pval = stats.mannwhitneyu(
                     fg, bg, alternative="greater", method="auto"
@@ -255,13 +275,21 @@ for et in compute_ets:
                         "day": day,
                         "n_top": len(fg),
                         "n_background": len(bg),
+                        "n_top_in_day_genes": int(is_top.sum()),
+                        "median_score_top": float(np.median(fg)),
+                        "median_score_background": float(np.median(bg)),
                         "U": u_stat,
                         "AUC": u_stat / (len(fg) * len(bg)),
                         "pval": pval,
                     }
                 )
+    records = [pd.DataFrame(records)]
+    print(
+        f"  [{et}] {len(records[0]):,} of {n_candidates:,} tests have >= "
+        f"{min_carriers_per_group} carriers in both groups"
+    )
 
-    results = pd.DataFrame(records)
+    results = pd.concat(records, ignore_index=True)
     _, qvals, _, _ = multipletests(results["pval"], method="fdr_bh")
     results["qval"] = qvals
     results["neg_log10_qval"] = -np.log10(results["qval"].clip(lower=1e-300))
@@ -314,199 +342,7 @@ print(
     f"Significant tests  : {n_sig_tests:,} / {n_total_tests:,} ({100 * n_sig_tests / n_total_tests:.1f}%)"
 )
 # %%
-sig_tfs_union = set(sig_union["tf"])
 et_order = [et for et in element_types if et in all_results]
-# %%
-# Plot 1b: TF x day heatmap of number of significantly enriched programs
-print("\nPlotting TF program-count heatmaps ...")
-
-all_tfs_sorted = sorted(sig_tfs_union)
-
-count_matrices = {}
-for et in et_order:
-    res = all_results[et]
-    count_matrices[et] = (
-        res[res["significant"]]
-        .groupby(["tf", "day"])["program"]
-        .nunique()
-        .unstack(fill_value=0)
-        .reindex(index=all_tfs_sorted, columns=days, fill_value=0)
-    )
-
-tf_total = sum(count_matrices[et].sum(axis=1) for et in et_order)
-tf_order_counts = tf_total.sort_values(ascending=False).index.tolist()
-count_vmax = max(m.values.max() for m in count_matrices.values())
-# %%
-fig, axes = plt.subplots(
-    1,
-    len(et_order),
-    figsize=(2.5 * len(et_order) + 1, max(4, len(sig_tfs_union) * 0.25 + 2)),
-)
-if len(et_order) == 1:
-    axes = [axes]
-
-for ax, et in zip(axes, et_order):
-    mat = count_matrices[et].reindex(tf_order_counts, fill_value=0)
-    is_last = et == et_order[-1]
-    sns.heatmap(
-        mat,
-        ax=ax,
-        cmap="Blues",
-        vmin=0,
-        vmax=count_vmax,
-        annot=True,
-        fmt="d",
-        linewidths=0.3,
-        linecolor="white",
-        cbar=is_last,
-        cbar_kws={"label": "# programs", "shrink": 0.4},
-        yticklabels=(et == et_order[0]),
-    )
-    ax.set_title(et)
-    ax.set_xlabel("")
-    ax.set_ylabel("")
-    ax.tick_params(axis="x", labelsize=10)
-    ax.tick_params(axis="y", labelsize=10)
-
-fig.suptitle(
-    f"# programs with significantly enriched TF per day\n{weight_strategy}, {hit_score_col}",
-    y=1.02,
-)
-plt.tight_layout()
-if save_plots:
-    stem = os.path.join(plots_dir, "tf_program_count_heatmap")
-    save_figure(fig, stem)
-    for et in et_order:
-        count_matrices[et].reindex(tf_order_counts, fill_value=0).to_csv(
-            f"{stem}_{et}_data.tsv", sep="\t"
-        )
-    print("Saved TF program count heatmap")
-
-# %%
-# Plot 1c: Program x day heatmap of number of significantly enriched TFs
-print("\nPlotting program TF-count heatmaps ...")
-
-all_programs = list(range(n_programs))
-
-prog_count_matrices = {}
-for et in et_order:
-    res = all_results[et]
-    prog_count_matrices[et] = (
-        res[res["significant"]]
-        .groupby(["program", "day"])["tf"]
-        .nunique()
-        .unstack(fill_value=0)
-        .reindex(index=all_programs, columns=days, fill_value=0)
-    )
-
-prog_total = sum(prog_count_matrices[et].sum(axis=1) for et in et_order)
-prog_order = prog_total.sort_values(ascending=False).index.tolist()
-prog_count_vmax = max(m.values.max() for m in prog_count_matrices.values())
-
-fig, axes = plt.subplots(
-    1,
-    len(et_order),
-    figsize=(2.5 * len(et_order) + 1, max(4, len(all_programs) * 0.25 + 2)),
-)
-if len(et_order) == 1:
-    axes = [axes]
-
-for ax, et in zip(axes, et_order):
-    mat = prog_count_matrices[et].reindex(prog_order, fill_value=0)
-    is_last = et == et_order[-1]
-    sns.heatmap(
-        mat,
-        ax=ax,
-        cmap="Blues",
-        annot=True,
-        vmin=0,
-        vmax=prog_count_vmax,
-        linewidths=0.3,
-        linecolor="white",
-        cbar=is_last,
-        cbar_kws={"label": "# TFs", "shrink": 0.4},
-        yticklabels=(et == et_order[0]),
-    )
-    ax.set_title(et)
-    ax.set_xlabel("")
-    ax.set_ylabel("")
-    ax.tick_params(axis="x", labelsize=10)
-    ax.tick_params(axis="y", labelsize=10, rotation=0)
-
-fig.suptitle(
-    f"# TFs significantly enriched per program per day\n{weight_strategy}, {hit_score_col}",
-    y=1.02,
-)
-plt.tight_layout()
-if save_plots:
-    stem = os.path.join(plots_dir, "program_tf_count_heatmap")
-    save_figure(fig, stem)
-    for et in et_order:
-        prog_count_matrices[et].reindex(prog_order, fill_value=0).to_csv(
-            f"{stem}_{et}_data.tsv", sep="\t"
-        )
-    print("Saved program TF count heatmap")
-
-# %%
-# Plot 2: per-program clustermap (significant TFs x days), primary element type
-print(f"\nPlotting per-program clustermaps ({primary_et}) ...")
-for prog_idx in range(n_programs):
-    prog_name = f"program_{prog_idx}"
-    if primary_et not in all_results:
-        break
-    prog_res = all_results[primary_et][all_results[primary_et]["program"] == prog_idx]
-    sig_tfs = sorted(prog_res.loc[prog_res["significant"], "tf"].unique())
-    if len(sig_tfs) == 0:
-        continue
-
-    nlq_pivot = (
-        prog_res[prog_res["tf"].isin(sig_tfs)]
-        .pivot(index="tf", columns="day", values="neg_log10_qval")
-        .reindex(columns=days, fill_value=0.0)
-        .fillna(0.0)
-    )
-    qval_pivot = (
-        prog_res[prog_res["tf"].isin(sig_tfs)]
-        .pivot(index="tf", columns="day", values="qval")
-        .reindex(columns=days, fill_value=1.0)
-        .fillna(1.0)
-    )
-
-    row_cluster = len(sig_tfs) > 1
-    cg = sns.clustermap(
-        nlq_pivot,
-        cmap="Blues",
-        vmin=0,
-        vmax=nlq_pivot.values.max(),
-        method="ward",
-        row_cluster=row_cluster,
-        col_cluster=False,
-        linewidths=0.3,
-        linecolor="white",
-        figsize=(4, max(2, len(sig_tfs) * 0.35 + 1)),
-        cbar_pos=(1.02, 0.4, 0.02, 0.2),
-        cbar_kws={"label": "-log10(q)"},
-        yticklabels=True,
-    )
-    reordered_tfs = (
-        nlq_pivot.index[cg.dendrogram_row.reordered_ind]
-        if row_cluster
-        else nlq_pivot.index
-    )
-    mark_significant(cg.ax_heatmap, qval_pivot, reordered_tfs, days)
-    cg.ax_heatmap.yaxis.set_tick_params(rotation=0)
-    cg.ax_heatmap.set_xlabel("")
-    cg.ax_heatmap.set_ylabel("")
-    cg.fig.suptitle(
-        f"{prog_name}, {primary_et}\n*** q<0.001  ** q<0.01  * q<0.05\n",
-        y=1.01,
-    )
-    if save_plots:
-        stem = os.path.join(plots_dir, "per_program", prog_name)
-        nlq_pivot.to_csv(f"{stem}_data.tsv", sep="\t")
-        for ext in ["pdf", "png"]:
-            cg.fig.savefig(f"{stem}.{ext}", bbox_inches="tight", transparent=True)
-
 # %%
 # Plot 3: Per-day clustermaps for programs of interest, one per element type
 # TF rows = all TFs significant in at least one POI program on that day.
@@ -639,7 +475,7 @@ for day in sorted(poi_by_day_3.keys()):
         cg.fig.suptitle(
             f"TF motif enrichment in programs of interest, {day}, {et}\n"
             f"{weight_strategy}, {hit_score_col}\n"
-            f"*** q<0.001;  ** q<0.01;  * q<0.05",
+            f"*** q<0.001;  ** q<0.01;  * q<{q_sig_threshold}",
             y=1.005,
             va="bottom",
         )
@@ -654,78 +490,6 @@ for day in sorted(poi_by_day_3.keys()):
                 f"{stem}_data.tsv", sep="\t"
             )
             print(f"  saved {os.path.basename(stem)}.pdf/.png")
-
-# %%
-# Plot 4: TF rank scatter for programs of interest (per day, primary element type)
-# adjustText is only needed here, so it is imported lazily: a missing optional
-# dependency should skip this one figure rather than abort the whole script.
-try:
-    from adjustText import adjust_text
-
-    have_adjust_text = True
-except ImportError:
-    have_adjust_text = False
-    print(
-        "\n[WARN] adjustText not installed; skipping Plot 4 (TF rank scatter).\n"
-        "       Existing tf_rank_scatter_*.pdf/.png are left untouched."
-    )
-
-poi_by_day = defaultdict(list)
-for prog, day in poi_prog_day:
-    poi_by_day[day].append(prog)
-# %%
-for day, progs in sorted(poi_by_day.items()) if have_adjust_text else []:
-    n_progs = len(progs)
-    fig, axes = plt.subplots(
-        1, n_progs, figsize=(3 * n_progs, 5), sharey=True, sharex=True
-    )
-    if n_progs == 1:
-        axes = [axes]
-
-    prog_frames = []
-    for prog in progs:
-        sub = all_results[primary_et][
-            (all_results[primary_et]["program"] == prog)
-            & (all_results[primary_et]["day"] == day)
-        ].copy()
-        sub["rank"] = (
-            sub["neg_log10_qval"].rank(ascending=False, method="min").astype(int)
-        )
-        sub = sub.sort_values("rank").reset_index(drop=True)
-        prog_frames.append(sub)
-
-    for i, (ax, prog, sub) in enumerate(zip(axes, progs, prog_frames)):
-        ax.scatter(
-            sub["rank"],
-            sub["neg_log10_qval"],
-            color="lightgray",
-            s=20,
-            zorder=2,
-        )
-        texts = [
-            ax.text(row["rank"], row["neg_log10_qval"], row["tf"], fontsize=8)
-            for _, row in sub.head(7).iterrows()
-        ]
-        adjust_text(texts, ax=ax, arrowprops=dict(arrowstyle="-", color="gray", lw=0.8))
-        ax.set_xlabel("TF motif rank")
-        ax.set_title(f"program {prog}\nn={sub['tf'].nunique()}\n", size=10)
-        if i == 0:
-            ax.set_ylabel("-log10(q-value)")
-
-    fig.suptitle(
-        f"TF enrichment rank, {day}, {primary_et}, {weight_strategy}, {hit_score_col}",
-        y=1.02,
-        size=10,
-    )
-    plt.tight_layout()
-    if save_plots:
-        for prog, sub in zip(progs, prog_frames):
-            sub.to_csv(
-                os.path.join(plots_dir, f"tf_rank_scatter_p{prog}_{day}_data.tsv"),
-                sep="\t",
-                index=False,
-            )
-        save_figure(fig, os.path.join(plots_dir, f"tf_rank_scatter_{day}"))
 
 # %%
 print("\n=== Done ===")

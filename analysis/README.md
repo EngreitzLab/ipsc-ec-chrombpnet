@@ -20,10 +20,11 @@ and the external input paths in the parameter block at the top of each script.
 | `0.0.motif_id_annotation.py` | Annotates compendium motif clusters against MotifCompendium-Database-Human and records which matched TFs are expressed per day. |
 | `0.2.finemo_hit_qc.py` | Chooses a per-motif CWM-similarity threshold from the Fi-NeMo reports and writes filtered hit tables. |
 | `0.3.hits_to_bed.sh` + `hits_to_bed.py` | Converts Fi-NeMo hits to colored BED9 tracks for IGV. |
-| `1.0.gene_motif_linking.py` | Computes distance-weighted TF contribution scores per gene per day using the scE2G gene-motif linking approach. |
-| `2.tf_enrichment_in_programs.py` | Tests enrichment of TF motif instances (separately) in the top genes of each cNMF program across all 50 programs × 4 days. See [detailed methods](#2-tf-motif-enrichment-in-cnmf-programs) below. |
-| `3.chrombpnet_figures.py` | Publication figures for programs of interest from the `2.` results (enhancer elements): per-day heatmaps with CWM logos, TF rank scatter. |
+| `1.0.gene_motif_linking.py` | Computes scE2G-weighted TF contribution scores per gene per day (each day's FiNeMo hits in that day's scE2G-linked elements). See [gene-motif linking](#1-gene-motif-linking) below. |
+| `2.tf_enrichment_in_programs.py` | Among genes carrying a TF motif in their linked enhancers, tests whether each cNMF program's top 300 genes have higher gene-motif scores (50 programs × d0–d3 × TFs); per-day clustermaps of the programs of interest. See [detailed methods](#2-tf-motif-enrichment-in-cnmf-programs) below. |
+| `3.chrombpnet_figures.py` | TF rank scatter per day for the programs of interest (`plots/tf_rank_scatter_{day}`), from the `2.` results. |
 | `src/genomics.py` | Shared genomic interval helpers (pybedtools hit/peak intersection). |
+| `run_analysis_script.sh` | Slurm wrapper that runs one analysis script in the analysis conda env, e.g. `sbatch --time=1:00:00 --mem=64G run_analysis_script.sh 2.tf_enrichment_in_programs.py`; set `analysis_env` and the partition for your cluster. |
 
 ---
 
@@ -174,7 +175,7 @@ encode how open and active a peak is.
 The gene-motif linking formula is:
 
 ```
-TF–gene score  =  Σ_peaks  E2G.Score.qnorm  ×  hit_score  ×  sign
+TF–gene score  =  Σ_peaks  E2G.Score.qnorm  ×  hit_score   (pos_patterns hits only)
 ```
 
 The ideal `hit_score` should be **orthogonal** to `E2G.Score.qnorm`: it should
@@ -209,144 +210,142 @@ both receive the full footprint sum.
 
 ---
 
-## 2 TF motif enrichment in cNMF programs
+## 1 Gene-motif linking
 
-**Script:** `2.tf_enrichment_in_programs.py`
+**Script:** `1.0.gene_motif_linking.py`
 
-### Goal
+For each element type (`promoter` = scE2G `isSelfPromoter` TRUE, `enhancer` =
+FALSE, i.e. genic + intergenic, `all_cres` = both) and each day (d0–d4):
 
-Determine which of the 50 cNMF programs, at each of the 4 differentiation
-days (d0–d3), have their top-loaded genes specifically enriched for TF
-motif instances.
+1. **Links of that day only.** Day X FiNeMo hits (`0.2.finemo_hit_qc/hits_filtered_{day}.tsv`)
+   are matched to day X scE2G links (`{day}/multiome_powerlaw_v3/scE2G_predictions_threshold0.177.tsv.gz`).
+   scE2G calls peaks per day, so the same enhancer appears in each day's file with
+   slightly shifted coordinates; matching hits to the union of all days would count a
+   hit once per overlapping copy (for d3 enhancers: 2.34 copies per hit-gene pair on
+   average, 61.5% of pairs counted more than once) and would add links that scE2G did
+   not predict on that day.
+2. **Hits fully inside an element** (`hit_fully_inside = True`, bedtools `-f 1.0`),
+   as in PerturbNMF Stage 2. Hits overhanging an element edge are not counted
+   (d3 enhancers: 94,109 → 93,815 gene-TF pairs).
+3. **Positive patterns only** (`pattern_prefixes = ("pos_patterns",)`), as in PerturbNMF
+   Stage 2. Until 2026-10-20 `neg_patterns` hits were kept and scored −1: they cancelled
+   `pos_patterns` of the same `tf_motif_id` (e.g. NFY-PBX_0) and inverted the meaning of
+   the one-sided test in script 2. One of them, `neg_patterns.21` (PRDM13 label), hits
+   most d3 elements.
+4. **Score** per hit and linked gene: `hit_coefficient_global × E2G.Score.qnorm`
+   (`weight_strategy = "e2g"`); all scores are >= 0.
+5. **Aggregate** by gene × TF (`tf_motif_id`) × day: sum over all hits in all linked
+   elements of that day (`weighted_score`), and the number of those hits (`n_hits`).
+   Gene-TF pairs without a hit have no row; in script 2 these genes are not carriers of
+   the motif and are left out of its test.
+
+Overlapping hits are deduplicated only within one motif cluster
+(`0.2.finemo_hit_qc.py`, > 3 bp, best `hit_similarity`), not across clusters sharing a
+`tf_motif_id`, in the current results: two clusters with the same label calling the same
+site both count (d3: 2.6% of positive-pattern hits, mostly ETV-ELF-NFAT-ELK_0, SOX_0 and
+CTCF_0). Cross-cluster dedup is implemented in `1.0` (`dedup_same_label`, off).
+
+Outputs:
+- `1.0.gene_motif_linking/data/{strategy}_{hit_score_col}_{et}_gene_motif_scores.tsv.gz`
+  (`TargetGene`, `tf_motif_id`, `weighted_score`, `n_hits`, `day`, `strategy`, `et`)
+- `1.0.gene_motif_linking/data/{et}_gene_covariates.tsv.gz`: motif-free per-gene
+  covariates per day (`n_elements`, `element_bp`, `sum_e2g_qnorm`, `chr`, `tss`)
 
 ---
+
+## 2 TF motif enrichment in cNMF programs
+
+**Script:** `2.tf_enrichment_in_programs.py` (figures: also `3.chrombpnet_figures.py`)
+
+### Question
+
+For each of the 50 cNMF programs and each day d0–d3: **among genes that carry a TF's
+motif in their linked enhancers, do the program's top genes have higher gene-motif
+scores than the other carriers?** This asks whether program genes have stronger or more
+highly weighted motif instances. It does not ask whether program genes carry the motif
+more often.
+
+cNMF was fitted on cells from d0 to d3 (the cNMF object has no d4 cells), so d4 is not
+tested.
 
 ### Inputs
 
 | Input | Description |
 |-------|-------------|
-| `cNMF_50_0_2.h5mu` | cNMF results: 50-program loadings (program × gene matrix) |
-| `hit_importance_gene_motif_linking/data/e2g_gene_motif_scores.tsv.gz` | Long-format table of gene × TF × day scE2G-weighted motif scores (`TargetGene`, `tf_name`, `day`, `weighted_score`) |
+| `cNMF_50_0_2.h5mu` | cNMF results: 50-program gene loadings (`varm["loadings"]`; behaves like cNMF `gene_spectra_score`) |
+| `1.0.gene_motif_linking/data/e2g_hit_coefficient_global_enhancer_gene_motif_scores.tsv.gz` | Gene × TF × day scE2G-weighted motif scores (`TargetGene`, `tf_motif_id`, `day`, `weighted_score`) |
 
----
+### Parameters
 
-### Key parameter
+| Parameter | Value | Meaning |
+|-----------|-------|---------|
+| `element_types` | `["enhancer"]` | Distal enhancers only (`isSelfPromoter` False) |
+| `n_top_genes` | 300 | Top genes per program by cNMF loading |
+| `min_carriers_per_group` | 5 | Minimum carriers in both the top set and the background for a test to run |
+| `q_sig_threshold` | 0.05 | BH-adjusted P cutoff |
+| `poi_prog_day` | 2 (d3), 15 (d2), 17 (d2), 24 (d3), 27 (d3), 34 (d3) | Programs of interest and their day (chosen independently of the motif results) |
 
-`n_top_genes = 300` — number of top-loading genes used to define each program's
-gene set (ranked by cNMF loading weight).
+### Steps
 
-Restricted to distal enhancer elements only (`element_types = ["enhancer"]`);
-promoter/all_cres are no longer tested here.
+1. **Carriers.** For each TF motif and day, the carriers are the cNMF genes with
+   `weighted_score > 0`, i.e. at least one positive-pattern hit in that day's linked
+   enhancers. Median carriers per TF: 140 (d0), 340 (d1), 257 (d2), 310 (d3).
+2. **Groups.** Foreground = carriers among the program's top 300 genes (`n_top`);
+   background = all other carriers (`n_background`). Genes without a hit of the motif are
+   not part of its test.
+3. **Filter.** A test runs only if `n_top >= 5` and `n_background >= 5`: 8,588 of 16,950
+   program × day × TF combinations. The filter uses only which genes carry the motif,
+   not their scores, so the test stays valid.
+4. **Test.** One-sided Mann-Whitney U (`scipy.stats.mannwhitneyu`,
+   `alternative="greater"`, `method="auto"`). H0: among carriers, scores of top genes
+   and of other genes come from the same distribution; Ha: top genes score higher.
+   Effect size `AUC = U / (n_top * n_background)` (0.5 = no difference), plus the median
+   score in each group. The direction is fixed in advance, so q < 0.05 controls the FDR
+   of enrichment calls at 5%.
+5. **Correction.** BH across all tests run (one family: programs × days × TFs).
 
----
+**Calibration.** On 200 random 300-gene sets (d3), the test gave p < 0.05 in 4.8%,
+p < 0.01 in 0.98% and p < 0.001 in 0.13% of tests, as expected under the null. Scores
+are continuous and > 0, so there are no tied zeros. Among carriers, scores barely track
+the number of linked enhancers (median Spearman 0.01 across TFs).
 
-### Step-by-step logic
+**History.** 2026-10-20 to 2026-10-21 the test was zero-filled: all genes with >= 1 hit
+of any TF, missing = 0. That mixed motif presence with score; with ~87% tied zeros its
+asymptotic p-values were badly anti-conservative for rare motifs (random gene sets gave
+p < 0.001 in 2.5% of tests for motifs with < 10 carriers), and presence tracks the
+number of linked enhancers.
 
-#### Step 1 — Define the gene universe
+### Results (run 2026-10-21)
 
-**Universe = genes present in the scE2G score file AND in the cNMF loadings.**
-Genes absent from the score file have no scE2G-linked peaks with any motif hit.
-Including them as score-0 background would conflate "no regulatory peaks" with
-"has peaks but no TF signal" — two biologically distinct situations. Since top
-program genes tend to be more expressed and therefore more accessible, including
-peak-less genes would inflate apparent enrichment artifactually. Using only
-scE2G-scored genes ensures the background is a meaningful biological negative
-control: genes with regulatory peak-gene links but low TF signal.
+493 of 8,588 tests significant (q < 0.05); 40 of 87 TFs significant in at least one
+program; 32 of 50 programs with at least one significant TF.
 
-#### Step 2 — Per-TF scored gene set, per day
-
-For each TF, `day_scores = scores_by_tf[et][tf][day]` holds one row per gene
-that has **at least one actual FiNeMo motif hit for that specific TF**
-somewhere in its scE2G-linked peaks (from `1.0.gene_motif_linking.py`'s
-`groupby(["TargetGene", "tf_motif_id"])["weighted_score"].sum()`). A gene with
-an scE2G link but *no* hit for that TF is not zero-filled — it is simply
-absent from `day_scores`, per the same reasoning as Step 1: a missing TF link
-is not the same claim as "TF importance score of exactly 0," and conflating
-the two would bias the comparison. This means the per-TF universe
-(`n1 + n2` below) varies substantially by TF — from single digits up to
-~13,000 genes in practice (25th percentile ~123, median ~608) — since it
-depends on how many genes that TF actually hits anywhere in this dataset, not
-on a fixed genome-wide gene count.
-
-`top_genes_set` (`n_top_genes = 300` highest-loading genes for the program)
-splits `day_scores` into:
-- `fg` — top-program genes that have a score for this TF
-- `bg` — every other gene that has a score for this TF
-
-H0: TF importance scores for the top 300 genes are drawn from the same
-distribution as the TF importance scores of other (TF-linked) genes.
-Ha: TF importance scores are higher for the top 300 genes.
-
-If either `fg` or `bg` is empty for a given program × TF × day (e.g. a
-low-hit-count TF with no top-program-gene overlap), that combination is
-skipped rather than tested.
-
-#### Step 3 — Enrichment test: `scipy.stats.mannwhitneyu`
-
-For each program × day × TF combination, call directly (no precomputed
-per-column ranks — each call does its own ranking internally):
-
-```python
-stat, pval = mannwhitneyu(
-    fg,
-    bg,
-    alternative="greater",
-    method="auto",
-)
-AUC = stat / (len(fg) * len(bg))  # 0.5 = null; >0.5 = top genes score higher
-```
-
-`method='auto'` lets scipy pick `'exact'` when a sample is small and tie-free,
-falling back to the asymptotic normal approximation otherwise — real per-TF
-universe sizes here range as low as single digits (see Step 2), so a hardcoded
-`'asymptotic'` would have been inappropriate for a meaningful fraction of
-tests; `'auto'` matches scipy's own guidance on when each method is valid.
-
-**Why one-sided:** The hypothesis is directional by design (H0: top-N genes'
-TF scores are drawn from the same distribution as other genes' TF scores;
-Ha: higher for top-N genes) — depletion/repression is not the question this
-test is asking. Note this means a TF that specifically represses top program
-genes (motif contributions are signed: `pos_patterns` = +1 activating,
-`neg_patterns` = -1 repressive) would not be flagged as significant here;
-that would need a separate one-sided `alternative='less'` test if wanted.
-
-**Why test all TFs:** Running enrichment for all ~104 TFs makes other motifs a
-natural matched background. TF's rank among all TFs (1 = most enriched)
-directly answers whether TF is specifically recruited to program genes beyond
-what any other motif shows.
-
-#### Step 4 — Multiple testing correction
-
-BH FDR applied **globally** across all 50 programs × 4 days × ~104 TFs ≈ 20,800
-tests.
-
-#### Step 5 — Rank TF among all TFs
-
-For each program × day, TFs are ranked by AUC (descending). TF2 and TF3
-ranks indicate their relative enrichment specificity.
-
----
+| Program, day | Significant / tested TFs | Strongest TFs |
+|--------------|--------------------------|---------------|
+| P2, d3 | 10 / 59 | ETV-ELF-NFAT-ELK, SOX, GATA, TCF-BHLH-SNAI |
+| P15, d2 | 7 / 52 | ETV-ELF-NFAT-ELK, GATA, ZNF_9, ZNF813 |
+| P17, d2 | 7 / 52 | GATA, ETV-ELF-NFAT-ELK, ZNF_9, TEAD |
+| P24, d3 | 6 / 58 | ETV-ELF-NFAT-ELK, SOX, MYCN, FOS-JUN |
+| P27, d3 | 3 / 52 | ETV-ELF-NFAT-ELK, SOX, MYCN |
+| P34, d3 | 7 / 53 | ETV-ELF-NFAT-ELK, TEAD, FOS-JUN, SOX |
 
 ### Outputs
 
 | File | Description |
 |------|-------------|
-| `results_primary.tsv` | All TF × program × day: AUC, p-value, q-value (BH), TF rank |
-| `results_tf.tsv` | TF2 and TF3 rows only |
-| `plots/t_auc_heatmap` | Two-panel heatmap (TF2, TF3): 50 programs × 4 days, AUC; stars = q<0.05/0.01 |
-| `plots/TF_rank_heatmap` | Two-panel heatmap: TF2, TF3 rank among all TFs |
-| `plots/TF_clustermap_poi` | Clustermap: rows = union of significant TFs in any POI × day; cols = programs of interest × days; AUC color (bwr, centered at 0.5); TF2/3 highlighted in red |
+| `2.tf_enrichment_in_programs/enhancer_enrichment_results.tsv` | One row per test run: `program`, `day`, `tf`, `n_top`, `n_background` (carriers), `n_top_in_day_genes`, `median_score_top`, `median_score_background`, `U`, `AUC`, `pval`, `qval` (BH), `neg_log10_qval`, `significant` |
+| `2.tf_enrichment_in_programs/plots/poi_by_day_clustermap_{day}_enhancer` | Per day: TFs significant in at least one program of interest × those programs, −log10(q), ward-clustered, stars = q < 0.001 / 0.01 / 0.05 |
+| `3.chrombpnet_figures/plots/tf_rank_scatter_{day}` | Per day: one panel per program of interest, TFs ranked by −log10(q), top TFs labeled |
 
-Programs of interest (13, 15, 17, 30, 34) are bolded on heatmap y-axes.
+Every plot has `.pdf`, `.png` and a `_data.tsv` with the plotted values.
 
----
+### Interpretation
 
-### Interpretation guide
-
-A program × day is considered robustly TF-enriched if:
-1. TF2 or TF3 AUC > 0.5, q < 0.05
-2. TF rank is low (top 5–10 among ~104 TFs) — enrichment is TF-specific, not
-   a general property of highly regulated genes
-
-The clustermap reveals which TFs co-enrich with TF across programs and days,
-and whether TFs cluster with other known co-regulators.
+- A significant TF means: among genes with that motif in linked enhancers, program genes
+  have stronger or more highly weighted instances (higher `hit_coefficient_global` ×
+  `E2G.Score.qnorm`, summed over their hits). It is not evidence that program genes carry
+  the motif more often.
+- Tests need at least 5 carriers among the top genes, so sparse motifs are often not
+  tested; "not tested" (no row) is not "not enriched".
+- Near-duplicate labels (e.g. TEAD_0 and TEAD1, ETS-like labels) are tested separately
+  and can reflect one signal.
