@@ -353,8 +353,9 @@ BH correction; 460 of the 465 hits at >= 1 are also significant at >= 10.
 | `2.tf_enrichment_in_programs/plots/poi_by_day_clustermap_{day}_enhancer_min10` | Per day: TFs significant in at least one program of interest × those programs, −log10(q), ward-clustered, stars = q < 0.001 / 0.01 / 0.05 |
 | `3.chrombpnet_figures/plots/tf_rank_scatter_{day}_min10` | Per day: one panel per program of interest, TFs ranked by −log10(q), top TFs labeled |
 
-Every plot has `.pdf`, `.png` and a `_data.tsv` with the plotted values. The
-`enhancer_enrichment_results_min1.tsv` and `_min20.tsv` tables are the sensitivity runs.
+Every plot has `.pdf`, `.png` and a `_data.tsv` with the plotted values. Sensitivity
+runs with other cutoffs (e.g. `MIN_CARRIERS_PER_GROUP=1` or `20`) write the same files
+with their own `_min{N}` tag.
 
 ### Interpretation
 
