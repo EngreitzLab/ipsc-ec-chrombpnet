@@ -6,7 +6,7 @@ enhancer results of 2.tf_enrichment_in_programs.py.
 TF rank scatter per day, one panel per program of interest (motifs ranked by
 -log10(BH-adjusted P), top motifs labeled).
 The per-day clustermaps of the programs of interest are made by
-2.tf_enrichment_in_programs.py (poi_by_day_clustermap_{day}_enhancer).
+2.tf_enrichment_in_programs.py (poi_by_day_clustermap_{day}_enhancer_{run_tag}).
 """
 
 # %%
@@ -45,6 +45,10 @@ days = ["d0", "d1", "d2", "d3"]
 # BH q cutoff for the one-sided (enrichment) test; the direction is fixed in
 # advance, so q < 0.05 controls the FDR of enrichment calls at 5%
 q_sig_threshold = 0.05
+# Carrier cutoff of the 2.tf_enrichment_in_programs.py run to plot (same environment
+# variable and min{N} tag as there)
+min_carriers_per_group = int(os.environ.get("MIN_CARRIERS_PER_GROUP", 10))
+run_tag = f"min{min_carriers_per_group}"
 
 # Programs of interest and the day each is most active
 poi_prog_day = [
@@ -81,7 +85,7 @@ def strip_number_suffix(tf_list):
 
 # %%
 # Load enhancer enrichment results
-results_path = os.path.join(enrichment_dir, f"{et}_enrichment_results.tsv")
+results_path = os.path.join(enrichment_dir, f"{et}_enrichment_results_{run_tag}.tsv")
 results = pd.read_csv(results_path, sep="\t")
 results["significant"] = results["qval"] < q_sig_threshold
 print(
@@ -153,17 +157,23 @@ for day, progs in sorted(poi_by_day.items()):
         if i == 0:
             ax.set_ylabel(f"-log10(q-value); {et_display}")
 
-    fig.suptitle(f"TF enrichment rank, {day}, {et_display}", y=1.02, size=10)
+    fig.suptitle(
+        f"TF enrichment rank, {day}, {et_display}; >= {min_carriers_per_group} carriers per group",
+        y=1.02,
+        size=10,
+    )
     plt.tight_layout()
     if save_plots:
         for prog, sub in zip(progs, prog_frames):
             sub.to_csv(
-                os.path.join(plots_dir, f"tf_rank_scatter_p{prog}_{day}_data.tsv"),
+                os.path.join(
+                    plots_dir, f"tf_rank_scatter_p{prog}_{day}_{run_tag}_data.tsv"
+                ),
                 sep="\t",
                 index=False,
             )
-        save_figure(fig, os.path.join(plots_dir, f"tf_rank_scatter_{day}"))
-        print(f"  saved tf_rank_scatter_{day}")
+        save_figure(fig, os.path.join(plots_dir, f"tf_rank_scatter_{day}_{run_tag}"))
+        print(f"  saved tf_rank_scatter_{day}_{run_tag}")
 
 # %%
 print("\n Done ")

@@ -281,7 +281,7 @@ tested.
 |-----------|-------|---------|
 | `element_types` | `["enhancer"]` | Distal enhancers only (`isSelfPromoter` False) |
 | `n_top_genes` | 300 | Top genes per program by cNMF loading |
-| `min_carriers_per_group` | 5 | Minimum carriers in both the top set and the background for a test to run |
+| `min_carriers_per_group` | 10 | Minimum carriers in both the top set and the background for a test to run (override with the environment variable `MIN_CARRIERS_PER_GROUP`; outputs are tagged `min{N}`) |
 | `q_sig_threshold` | 0.05 | BH-adjusted P cutoff |
 | `poi_prog_day` | 2 (d3), 15 (d2), 17 (d2), 24 (d3), 27 (d3), 34 (d3) | Programs of interest and their day (chosen independently of the motif results) |
 
@@ -293,9 +293,12 @@ tested.
 2. **Groups.** Foreground = carriers among the program's top 300 genes (`n_top`);
    background = all other carriers (`n_background`). Genes without a hit of the motif are
    not part of its test.
-3. **Filter.** A test runs only if `n_top >= 5` and `n_background >= 5`: 8,588 of 16,950
-   program × day × TF combinations. The filter uses only which genes carry the motif,
-   not their scores, so the test stays valid.
+3. **Filter.** A test runs only if `n_top >= 10` and `n_background >= 10`: 6,683 of
+   16,950 program × day × TF combinations. Ten genes per group keep the U test from
+   resting on a handful of genes. The filter uses only which genes carry the motif, not
+   their scores, so the test stays valid. Every test with >= 10 top-gene carriers also
+   has >= 20 background carriers (median ~555), so a background cutoff of 10 or 20 gives
+   the same tests.
 4. **Test.** One-sided Mann-Whitney U (`scipy.stats.mannwhitneyu`,
    `alternative="greater"`, `method="auto"`). H0: among carriers, scores of top genes
    and of other genes come from the same distribution; Ha: top genes score higher.
@@ -315,29 +318,43 @@ asymptotic p-values were badly anti-conservative for rare motifs (random gene se
 p < 0.001 in 2.5% of tests for motifs with < 10 carriers), and presence tracks the
 number of linked enhancers.
 
-### Results (run 2026-10-21)
+### Results (run 2026-10-21, >= 10 carriers per group)
 
-493 of 8,588 tests significant (q < 0.05); 40 of 87 TFs significant in at least one
-program; 32 of 50 programs with at least one significant TF.
+523 of 6,683 tests significant (q < 0.05); 40 of 70 tested TFs significant in at least
+one program; 33 of 50 programs with at least one significant TF.
+
+**Sensitivity to the carrier cutoff** (same code, `MIN_CARRIERS_PER_GROUP`):
+
+| Cutoff per group | Tests | Significant |
+|------------------|-------|-------------|
+| >= 1 | 12,817 | 465 |
+| >= 5 | 8,588 | 493 |
+| **>= 10 (main)** | **6,683** | **523** |
+| >= 20 | 5,027 | 553 |
+
+The top motifs of the programs of interest are the same at every cutoff. More tests
+pass at higher cutoffs because the removed tests have little power and only add to the
+BH correction; 460 of the 465 hits at >= 1 are also significant at >= 10.
 
 | Program, day | Significant / tested TFs | Strongest TFs |
 |--------------|--------------------------|---------------|
-| P2, d3 | 10 / 59 | ETV-ELF-NFAT-ELK, SOX, GATA, TCF-BHLH-SNAI |
-| P15, d2 | 7 / 52 | ETV-ELF-NFAT-ELK, GATA, ZNF_9, ZNF813 |
-| P17, d2 | 7 / 52 | GATA, ETV-ELF-NFAT-ELK, ZNF_9, TEAD |
-| P24, d3 | 6 / 58 | ETV-ELF-NFAT-ELK, SOX, MYCN, FOS-JUN |
-| P27, d3 | 3 / 52 | ETV-ELF-NFAT-ELK, SOX, MYCN |
-| P34, d3 | 7 / 53 | ETV-ELF-NFAT-ELK, TEAD, FOS-JUN, SOX |
+| P2, d3 | 10 / 49 | ETV-ELF-NFAT-ELK, SOX, GATA, TCF-BHLH-SNAI |
+| P15, d2 | 9 / 45 | ETV-ELF-NFAT-ELK, GATA, ZNF_9, ZNF813 |
+| P17, d2 | 8 / 42 | GATA, ETV-ELF-NFAT-ELK, ZNF_9, TEAD |
+| P24, d3 | 6 / 46 | ETV-ELF-NFAT-ELK, SOX, MYCN, FOS-JUN |
+| P27, d3 | 4 / 45 | ETV-ELF-NFAT-ELK, SOX, MYCN, GATA |
+| P34, d3 | 8 / 42 | ETV-ELF-NFAT-ELK, TEAD, FOS-JUN, SOX |
 
 ### Outputs
 
 | File | Description |
 |------|-------------|
-| `2.tf_enrichment_in_programs/enhancer_enrichment_results.tsv` | One row per test run: `program`, `day`, `tf`, `n_top`, `n_background` (carriers), `n_top_in_day_genes`, `median_score_top`, `median_score_background`, `U`, `AUC`, `pval`, `qval` (BH), `neg_log10_qval`, `significant` |
-| `2.tf_enrichment_in_programs/plots/poi_by_day_clustermap_{day}_enhancer` | Per day: TFs significant in at least one program of interest × those programs, −log10(q), ward-clustered, stars = q < 0.001 / 0.01 / 0.05 |
-| `3.chrombpnet_figures/plots/tf_rank_scatter_{day}` | Per day: one panel per program of interest, TFs ranked by −log10(q), top TFs labeled |
+| `2.tf_enrichment_in_programs/enhancer_enrichment_results_min10.tsv` | One row per test run: `program`, `day`, `tf`, `n_top`, `n_background` (carriers), `n_top_in_day_genes`, `median_score_top`, `median_score_background`, `U`, `AUC`, `pval`, `qval` (BH), `neg_log10_qval`, `significant` |
+| `2.tf_enrichment_in_programs/plots/poi_by_day_clustermap_{day}_enhancer_min10` | Per day: TFs significant in at least one program of interest × those programs, −log10(q), ward-clustered, stars = q < 0.001 / 0.01 / 0.05 |
+| `3.chrombpnet_figures/plots/tf_rank_scatter_{day}_min10` | Per day: one panel per program of interest, TFs ranked by −log10(q), top TFs labeled |
 
-Every plot has `.pdf`, `.png` and a `_data.tsv` with the plotted values.
+Every plot has `.pdf`, `.png` and a `_data.tsv` with the plotted values. The
+`enhancer_enrichment_results_min1.tsv` and `_min20.tsv` tables are the sensitivity runs.
 
 ### Interpretation
 
@@ -345,7 +362,8 @@ Every plot has `.pdf`, `.png` and a `_data.tsv` with the plotted values.
   have stronger or more highly weighted instances (higher `hit_coefficient_global` ×
   `E2G.Score.qnorm`, summed over their hits). It is not evidence that program genes carry
   the motif more often.
-- Tests need at least 5 carriers among the top genes, so sparse motifs are often not
-  tested; "not tested" (no row) is not "not enriched".
+- Tests need at least 10 carriers among the top genes and in the background, so sparse
+  motifs are often not tested (70 of 96 motifs are tested at least once); "not tested"
+  (no row) is not "not enriched".
 - Near-duplicate labels (e.g. TEAD_0 and TEAD1, ETS-like labels) are tested separately
   and can reflect one signal.

@@ -13,10 +13,15 @@ afterward):
                  hit are not part of the test
   - Foreground : carriers among the top n_top_genes by cNMF program loading
   - Background : all other carriers of the TF on that day
-  - Filter     : tests with fewer than min_carriers_per_group carriers in the
-                 foreground or background are not run. The filter uses only who
-                 carries the motif, not the scores, so the conditional test
-                 stays valid
+  - Filter     : a test runs only when the foreground and the background each have
+                 at least min_carriers_per_group carriers (default 10, so the U
+                 test is not based on a handful of genes). The filter uses only
+                 who carries the motif, not the scores, so the conditional test
+                 stays valid. Sensitivity (2026-10-21): >= 1 gave 12,817 tests and
+                 465 significant, >= 5 8,588 and 493, >= 10 6,683 and 523, >= 20
+                 5,027 and 553; the top motifs of the programs of interest are the
+                 same at every cutoff. Requiring 10 or 20 background carriers
+                 gives the same tests once the foreground has >= 10
   - Test       : one-sided Mann-Whitney U (alternative='greater').
                  H0: among carriers, scores of top genes and of other genes are
                  drawn from the same distribution.
@@ -33,9 +38,9 @@ afterward):
 Outputs
 -------
   analysis/2.tf_enrichment_in_programs/
-    {et}_enrichment_results.tsv
+    {et}_enrichment_results_{run_tag}.tsv        run_tag = min{min_carriers_per_group}
     plots/
-      poi_by_day_clustermap_{day}_{et}.{pdf,png,_data.tsv}  clustered TFs x POI programs,
+      poi_by_day_clustermap_{day}_{et}_{run_tag}.{pdf,png,_data.tsv}  clustered TFs x POI programs,
                                                             per day
   (TF rank scatter for the programs of interest: 3.chrombpnet_figures.py)
 """
@@ -82,7 +87,11 @@ element_types = ["enhancer"]
 
 n_top_genes = 300  # foreground: top N genes per cNMF program
 # Minimum motif carriers in the foreground and in the background for a test to run
-min_carriers_per_group = 5
+# (default 10; 1 = every test with at least one carrier in each group). The environment variable
+# MIN_CARRIERS_PER_GROUP overrides it, so several cutoffs can be run without editing
+# (3.chrombpnet_figures.py reads the same variable). Outputs are tagged min{N}
+min_carriers_per_group = int(os.environ.get("MIN_CARRIERS_PER_GROUP", 10))
+run_tag = f"min{min_carriers_per_group}"
 days = ["d0", "d1", "d2", "d3"]
 # BH q cutoff for the one-sided (enrichment) test; the direction is fixed in
 # advance, so q < 0.05 controls the FDR of enrichment calls at 5%
@@ -302,7 +311,7 @@ for et in compute_ets:
         f"  [{et}] significant: {n_sig} / {len(results)} tests (q < {q_sig_threshold})"
     )
 
-    out_path = os.path.join(output_dir, f"{et}_enrichment_results.tsv")
+    out_path = os.path.join(output_dir, f"{et}_enrichment_results_{run_tag}.tsv")
     results.to_csv(out_path, sep="\t", index=False)
     print(f"  [{et}] saved -> {out_path}")
 # %%
@@ -310,7 +319,9 @@ for et in compute_ets:
 # regenerated without redoing the test sweep.
 if reuse_enrichment:
     for et in element_types:
-        results_path = os.path.join(output_dir, f"{et}_enrichment_results.tsv")
+        results_path = os.path.join(
+            output_dir, f"{et}_enrichment_results_{run_tag}.tsv"
+        )
         if not os.path.exists(results_path):
             raise FileNotFoundError(
                 f"reuse_enrichment=True but {results_path} is missing; "
@@ -474,14 +485,16 @@ for day in sorted(poi_by_day_3.keys()):
         # it cannot overlap the column dendrogram; bbox_inches="tight" keeps it.
         cg.fig.suptitle(
             f"TF motif enrichment in programs of interest, {day}, {et}\n"
-            f"{weight_strategy}, {hit_score_col}\n"
+            f"{weight_strategy}, {hit_score_col}; >= {min_carriers_per_group} carriers per group\n"
             f"*** q<0.001;  ** q<0.01;  * q<{q_sig_threshold}",
             y=1.005,
             va="bottom",
         )
 
         if save_plots:
-            stem = os.path.join(plots_dir, f"poi_by_day_clustermap_{day}_{et}")
+            stem = os.path.join(
+                plots_dir, f"poi_by_day_clustermap_{day}_{et}_{run_tag}"
+            )
             for ext in ("pdf", "png"):
                 cg.fig.savefig(f"{stem}.{ext}", bbox_inches="tight", transparent=True)
             # Save in the plotted (clustered) order so the table matches the
