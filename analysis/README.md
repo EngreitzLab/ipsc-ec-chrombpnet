@@ -22,7 +22,7 @@ and the external input paths in the parameter block at the top of each script.
 | `0.3.hits_to_bed.sh` + `hits_to_bed.py` | Converts Fi-NeMo hits to colored BED9 tracks for IGV. |
 | `1.0.gene_motif_linking.py` | Computes scE2G-weighted TF contribution scores per gene per day (each day's FiNeMo hits in that day's scE2G-linked elements). See [gene-motif linking](#1-gene-motif-linking) below. |
 | `2.tf_enrichment_in_programs.py` | Among genes carrying a TF motif in their linked enhancers, tests whether each cNMF program's top 300 genes have higher gene-motif scores (50 programs × d0–d3 × TFs); per-day clustermaps of the programs of interest. See [detailed methods](#2-tf-motif-enrichment-in-cnmf-programs) below. |
-| `3.chrombpnet_figures.py` | TF rank scatter per day for the programs of interest (`plots/tf_rank_scatter_{day}`), from the `2.` results. |
+| `3.chrombpnet_figures.py` | TF rank scatter per day for the programs of interest (`plots/tf_rank_scatter_{day}_min10`), from the `2.` results. |
 | `src/genomics.py` | Shared genomic interval helpers (pybedtools hit/peak intersection). |
 | `run_analysis_script.sh` | Slurm wrapper that runs one analysis script in the analysis conda env, e.g. `sbatch --time=1:00:00 --mem=64G run_analysis_script.sh 2.tf_enrichment_in_programs.py`; set `analysis_env` and the partition for your cluster. |
 
@@ -243,13 +243,14 @@ Overlapping hits are deduplicated only within one motif cluster
 (`0.2.finemo_hit_qc.py`, > 3 bp, best `hit_similarity`), not across clusters sharing a
 `tf_motif_id`, in the current results: two clusters with the same label calling the same
 site both count (d3: 2.6% of positive-pattern hits, mostly ETV-ELF-NFAT-ELK_0, SOX_0 and
-CTCF_0). Cross-cluster dedup is implemented in `1.0` (`dedup_same_label`, off).
+CTCF_0). Cross-cluster dedup is implemented in `1.0` (`dedup_same_label`) but off.
 
 Outputs:
 - `1.0.gene_motif_linking/data/{strategy}_{hit_score_col}_{et}_gene_motif_scores.tsv.gz`
   (`TargetGene`, `tf_motif_id`, `weighted_score`, `n_hits`, `day`, `strategy`, `et`)
 - `1.0.gene_motif_linking/data/{et}_gene_covariates.tsv.gz`: motif-free per-gene
-  covariates per day (`n_elements`, `element_bp`, `sum_e2g_qnorm`, `chr`, `tss`)
+  covariates per day (`n_elements`, `element_bp`, `sum_e2g_qnorm`, `chr`, `tss`); not used
+  by script 2
 
 ---
 
@@ -307,10 +308,17 @@ tested.
    of enrichment calls at 5%.
 5. **Correction.** BH across all tests run (one family: programs × days × TFs).
 
-**Calibration.** On 200 random 300-gene sets (d3), the test gave p < 0.05 in 4.8%,
-p < 0.01 in 0.98% and p < 0.001 in 0.13% of tests, as expected under the null. Scores
-are continuous and > 0, so there are no tied zeros. Among carriers, scores barely track
-the number of linked enhancers (median Spearman 0.01 across TFs).
+**Calibration.** On 200 random 300-gene sets (d3, >= 5 carriers per group), the test
+gave p < 0.05 in 4.8%, p < 0.01 in 0.98% and p < 0.001 in 0.13% of tests, as expected
+under the null; small tests (1 to 4 top-gene carriers) were also calibrated or
+conservative. Scores are continuous and > 0, so there are no tied zeros. Among carriers,
+scores barely track the number of linked enhancers (median Spearman 0.01 across TFs).
+
+**Verification (d3, 2026-10-21).** An independent reimplementation (interval search
+without bedtools, ranks computed directly) reproduced all 86,623 d3 enhancer gene-motif
+scores (relative difference < 1e-12, identical hit counts) and all 1,611 d3 tests at
+>= 10 carriers (identical carrier counts and U, p-values to 1e-13, BH q-values to
+1e-15). Every significant test has AUC > 0.5 and a higher median score in the top genes.
 
 **History.** 2026-10-20 to 2026-10-21 the test was zero-filled: all genes with >= 1 hit
 of any TF, missing = 0. That mixed motif presence with score; with ~87% tied zeros its
